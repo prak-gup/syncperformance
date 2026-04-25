@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Revenue Entries (Visible to {{ user.role }})</h2>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Client</th>
+      <th>Client Type</th>
+      <th>Agency</th>
+      <th>Campaign</th>
+      <th>Assigned User</th>
+      <th>Quarter</th>
+      <th>Pipeline</th>
+      <th>RO</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.client_name }}</td>
+        <td>{{ r.client_type }}</td>
+        <td>{{ r.agency_name }}</td>
+        <td>{{ r.campaign_name }}</td>
+        <td>{{ r.salesperson_name }}</td>
+        <td>{{ r.quarter }}</td>
+        <td>{{ r.pipeline_value }}</td>
+        <td>{{ r.ro_value }}</td>
+        <td>{{ r.status }}</td>
+        <td class="actions">
+          <a href="{{ url_for('edit_entry', entry_id=r.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('delete_entry', entry_id=r.id) }}" style="display:inline;">
+            <button type="submit" onclick="return confirm('Delete this entry?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11">No entries found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

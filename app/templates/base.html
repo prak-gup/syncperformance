@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revenue App</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; }
+      .nav { margin-bottom: 16px; }
+      .nav a { margin-right: 12px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+      .card { border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+      .flash { background:#e8f5e9; border:1px solid #c8e6c9; padding:8px; margin:8px 0; }
+      .form-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .form-grid label { display:block; font-size: 12px; color:#444; }
+      .form-grid input, .form-grid select, .form-grid textarea { width:100%; padding:6px; }
+      .actions { white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    {% if session.user_id %}
+    <div class="nav">
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('entries') }}">Revenue Entries</a>
+      <a href="{{ url_for('create_entry') }}">Add Entry</a>
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
+    {% endif %}
+
+    {% for message in get_flashed_messages() %}
+      <div class="flash">{{ message }}</div>
+    {% endfor %}
+
+    {% block content %}{% endblock %}
+  </body>
+</html>

@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ dashboard_title }}</h2>
+<p>{{ dashboard_subtitle }}</p>
+<div class="cards">
+  <div class="card"><strong>Total Entries</strong><br/>{{ metrics.entries }}</div>
+  <div class="card"><strong>Total Plan</strong><br/>{{ '%.2f'|format(metrics.plan_value) }}</div>
+  <div class="card"><strong>Total Pipeline</strong><br/>{{ '%.2f'|format(metrics.pipeline_value) }}</div>
+  <div class="card"><strong>Total RO</strong><br/>{{ '%.2f'|format(metrics.ro_value) }}</div>
+  <div class="card"><strong>New Client Revenue</strong><br/>{{ '%.2f'|format(metrics.new_revenue) }}</div>
+  <div class="card"><strong>Existing Client Revenue</strong><br/>{{ '%.2f'|format(metrics.existing_revenue) }}</div>
+  <div class="card"><strong>Pending Follow-ups</strong><br/>{{ metrics.pending_followups }}</div>
+  <div class="card"><strong>Pipeline Conversion %</strong><br/>{{ '%.2f'|format(metrics.conversion_pct) }}%</div>
+</div>
+
+{% if scope_table %}
+<h3>Hierarchy Roll-up</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Level</th><th>Entries</th><th>Plan</th><th>Pipeline</th><th>RO</th><th>New Revenue</th><th>Existing Revenue</th><th>Pending Follow-ups</th><th>Conversion %</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in scope_table %}
+      <tr>
+        <td>{{ s.label }}</td>
+        <td>{{ s.entries }}</td>
+        <td>{{ '%.2f'|format(s.plan_value) }}</td>
+        <td>{{ '%.2f'|format(s.pipeline_value) }}</td>
+        <td>{{ '%.2f'|format(s.ro_value) }}</td>
+        <td>{{ '%.2f'|format(s.new_revenue) }}</td>
+        <td>{{ '%.2f'|format(s.existing_revenue) }}</td>
+        <td>{{ s.pending_followups }}</td>
+        <td>{{ '%.2f'|format(s.conversion_pct) }}%</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9">No roll-up data found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h3>Quarter-wise Performance</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Quarter</th><th>Entries</th><th>Plan</th><th>Pipeline</th><th>RO</th><th>New Revenue</th><th>Existing Revenue</th><th>Pending Follow-ups</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for q in quarter_summary %}
+      <tr>
+        <td>{{ q.label }}</td>
+        <td>{{ q.entries }}</td>
+        <td>{{ '%.2f'|format(q.plan_value) }}</td>
+        <td>{{ '%.2f'|format(q.pipeline_value) }}</td>
+        <td>{{ '%.2f'|format(q.ro_value) }}</td>
+        <td>{{ '%.2f'|format(q.new_revenue) }}</td>
+        <td>{{ '%.2f'|format(q.existing_revenue) }}</td>
+        <td>{{ q.pending_followups }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8">No quarterly data found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>Recent Visible Entries</h3>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th><th>Client</th><th>Type</th><th>Salesperson</th><th>Manager</th><th>Region</th><th>Quarter</th><th>Pipeline</th><th>RO</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in recent_rows %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td>{{ r.client_name }}</td>
+        <td>{{ r.client_type }}</td>
+        <td>{{ r.salesperson_name }}</td>
+        <td>{{ r.manager_name or '-' }}</td>
+        <td>{{ r.region or '-' }}</td>
+        <td>{{ r.quarter }}</td>
+        <td>{{ r.pipeline_value }}</td>
+        <td>{{ r.ro_value }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9">No entries found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
