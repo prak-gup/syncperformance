@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{% if entry %}Edit{% else %}Add{% endif %} Revenue Entry</h2>
+<form method="post" class="form-grid">
+  <div>
+    <label>Client Name *</label>
+    <input name="client_name" required value="{{ entry.client_name if entry else '' }}" />
+  </div>
+  <div>
+    <label>Client Type *</label>
+    <select name="client_type" required>
+      <option value="New" {% if entry and entry.client_type == 'New' %}selected{% endif %}>New</option>
+      <option value="Existing" {% if entry and entry.client_type == 'Existing' %}selected{% endif %}>Existing</option>
+    </select>
+  </div>
+
+  <div><label>Agency Name</label><input name="agency_name" value="{{ entry.agency_name if entry else '' }}" /></div>
+  <div><label>Campaign Name</label><input name="campaign_name" value="{{ entry.campaign_name if entry else '' }}" /></div>
+
+  <div>
+    <label>Assigned Salesperson *</label>
+    <select name="assigned_user_id" required>
+      {% for u in assignable %}
+        <option value="{{ u.id }}" {% if entry and entry.assigned_user_id == u.id %}selected{% endif %}>{{ u.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <label>Quarter *</label>
+    <select name="quarter" required>
+      {% for q in ['Q1','Q2','Q3','Q4'] %}
+      <option value="{{ q }}" {% if entry and entry.quarter == q %}selected{% endif %}>{{ q }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div><label>Entry Date *</label><input type="date" name="entry_date" required value="{{ entry.entry_date if entry else today }}"/></div>
+  <div><label>Plan Shared</label><input type="checkbox" name="plan_shared" {% if entry and entry.plan_shared %}checked{% endif %}/></div>
+
+  <div><label>Plan Date</label><input type="date" name="plan_date" value="{{ entry.plan_date if entry else '' }}"/></div>
+  <div><label>Plan Value</label><input type="number" step="0.01" name="plan_value" value="{{ entry.plan_value if entry else 0 }}"/></div>
+
+  <div><label>Negotiation Stage</label><input name="negotiation_stage" value="{{ entry.negotiation_stage if entry else '' }}"/></div>
+  <div><label>Pipeline Value</label><input type="number" step="0.01" name="pipeline_value" value="{{ entry.pipeline_value if entry else 0 }}"/></div>
+
+  <div><label>RO Date</label><input type="date" name="ro_date" value="{{ entry.ro_date if entry else '' }}"/></div>
+  <div><label>RO Value</label><input type="number" step="0.01" name="ro_value" value="{{ entry.ro_value if entry else 0 }}"/></div>
+
+  <div><label>Status</label><input name="status" value="{{ entry.status if entry else '' }}"/></div>
+  <div><label>Follow-up Date</label><input type="date" name="follow_up_date" value="{{ entry.follow_up_date if entry else '' }}"/></div>
+
+  <div style="grid-column: 1 / span 2;">
+    <label>Remarks</label>
+    <textarea name="remarks">{{ entry.remarks if entry else '' }}</textarea>
+  </div>
+
+  <div style="grid-column: 1 / span 2;">
+    <button type="submit">Save</button>
+  </div>
+</form>
+{% endblock %}
