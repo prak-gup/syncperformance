@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+{% block title %}Targets · Admin · Sync Performance{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">Targets</h1>
+      <p class="dash-header__subtitle">
+        Set per-team per-quarter targets at the leaf level. Manager-level access labels are the smallest unit; regional and national targets auto-rollup as the sum of children. FY {{ fy }}.
+      </p>
+    </div>
+    <span class="dash-header__role">admin</span>
+  </header>
+
+  <form method="get" class="filter-bar" aria-label="Fiscal year">
+    <div class="filter-bar__inner">
+      <span class="filter-bar__label">Fiscal year</span>
+      <label class="filter-chip">
+        <span class="filter-chip__label">FY</span>
+        <select name="fiscal_year" onchange="this.form.submit()">
+          {% for y in [fy - 1, fy, fy + 1] %}
+            <option value="{{ y }}" {% if y == fy %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('admin_targets', fiscal_year=fy) }}" class="card">
+    <h2 class="card__title">Targets matrix · FY {{ fy }}</h2>
+    {% if not matrix %}
+      <p style="color: var(--ink-48); font-size: 14px;">
+        No leaf-level access labels are defined yet. Add managers or salespeople in
+        <a href="{{ url_for('admin_team') }}">Team</a> to populate this matrix.
+      </p>
+    {% else %}
+    <table class="tbl tbl--targets">
+      <thead>
+        <tr>
+          <th>Team / Access</th>
+          <th>Region</th>
+          <th>Holders</th>
+          {% for q in quarters %}
+            <th class="num">{{ q }}</th>
+          {% endfor %}
+          <th class="num">Row total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in matrix %}
+          {% set row_idx = loop.index0 %}
+          <tr>
+            <td>
+              <strong>{{ r.label }}</strong>
+              <input type="hidden" name="label__{{ row_idx }}" value="{{ r.label }}" />
+            </td>
+            <td>{{ r.region or '—' }}</td>
+            <td><span class="holders">{{ r.holders }}</span></td>
+            {% for q in quarters %}
+              <td class="num">
+                <input class="input--target" type="number" step="0.01" min="0"
+                       name="target__{{ row_idx }}__{{ q }}"
+                       data-row="{{ row_idx }}"
+                       value="{{ '%.2f'|format(r.cells[q]) }}" />
+              </td>
+            {% endfor %}
+            <td class="num"><strong data-row-total="{{ row_idx }}">{{ '%.0f'|format(r.total) }}</strong></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3"><strong>Total</strong></td>
+          {% for q in quarters %}
+            <td class="num"><strong data-col-total="{{ q }}">{{ '%.0f'|format(col_totals[q]) }}</strong></td>
+          {% endfor %}
+          <td class="num"><strong data-grand-total>{{ '%.0f'|format(grand_total) }}</strong></td>
+        </tr>
+      </tfoot>
+    </table>
+    {% endif %}
+
+    {% if matrix %}
+    <div class="form-actions">
+      <button class="btn-pill-primary" type="submit">Save targets</button>
+      <a class="btn-pill-ghost" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+    </div>
+    {% endif %}
+  </form>
+
+</div>
+
+<script>
+  // Live row/column/grand-total updates as targets are typed
+  (function() {
+    var inputs = document.querySelectorAll('input.input--target');
+    function recompute() {
+      var quarters = {{ quarters|tojson }};
+      var rowTotals = {};
+      var colTotals = {};
+      quarters.forEach(function(q) { colTotals[q] = 0; });
+      var grand = 0;
+      inputs.forEach(function(inp) {
+        var parts = inp.name.split('__'); // target__{row}__{q}
+        var rowIdx = parts[1];
+        var q = parts[2];
+        var v = parseFloat(inp.value) || 0;
+        rowTotals[rowIdx] = (rowTotals[rowIdx] || 0) + v;
+        colTotals[q] = (colTotals[q] || 0) + v;
+        grand += v;
+      });
+      Object.keys(rowTotals).forEach(function(idx) {
+        var el = document.querySelector('[data-row-total="' + idx + '"]');
+        if (el) el.textContent = Math.round(rowTotals[idx]);
+      });
+      Object.keys(colTotals).forEach(function(q) {
+        var el = document.querySelector('[data-col-total="' + q + '"]');
+        if (el) el.textContent = Math.round(colTotals[q]);
+      });
+      var ge = document.querySelector('[data-grand-total]');
+      if (ge) ge.textContent = Math.round(grand);
+    }
+    inputs.forEach(function(inp) { inp.addEventListener('input', recompute); });
+  })();
+</script>
+{% endblock %}

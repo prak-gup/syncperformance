@@ -1,45 +1,194 @@
 {% extends 'base.html' %}
+{% block title %}Revenue Entries · Sync Performance{% endblock %}
+
+{% set fopts = filter_options %}
+{% set cf = current_filters %}
+
 {% block content %}
-<h2>Revenue Entries (Visible to {{ user.role }})</h2>
-<table>
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Client</th>
-      <th>Client Type</th>
-      <th>Agency</th>
-      <th>Campaign</th>
-      <th>Assigned User</th>
-      <th>Quarter</th>
-      <th>Pipeline</th>
-      <th>RO</th>
-      <th>Status</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-      <tr>
-        <td>{{ r.id }}</td>
-        <td>{{ r.client_name }}</td>
-        <td>{{ r.client_type }}</td>
-        <td>{{ r.agency_name }}</td>
-        <td>{{ r.campaign_name }}</td>
-        <td>{{ r.salesperson_name }}</td>
-        <td>{{ r.quarter }}</td>
-        <td>{{ r.pipeline_value }}</td>
-        <td>{{ r.ro_value }}</td>
-        <td>{{ r.status }}</td>
-        <td class="actions">
-          <a href="{{ url_for('edit_entry', entry_id=r.id) }}">Edit</a>
-          <form method="post" action="{{ url_for('delete_entry', entry_id=r.id) }}" style="display:inline;">
-            <button type="submit" onclick="return confirm('Delete this entry?')">Delete</button>
-          </form>
-        </td>
-      </tr>
-    {% else %}
-      <tr><td colspan="11">No entries found.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+<section class="tile tile--light">
+  <div class="tile-inner">
+    <header class="page-header">
+      <div class="page-header__copy">
+        <h1 class="t-tile-headline page-header__title">Revenue Entries</h1>
+        <p class="t-lead page-header__lead">
+          {% if active_filter_count %}
+            Showing {{ filtered_count }} of {{ total_count }} entries.
+          {% else %}
+            {{ total_count }} entries visible to <strong>{{ user.role|replace('_', ' ') }}</strong>.
+          {% endif %}
+          {% if cancelled_count %} {{ cancelled_count }} cancelled.{% endif %}
+        </p>
+      </div>
+      <a class="btn-pill-primary" href="{{ url_for('create_entry') }}">Add Revenue Entry</a>
+    </header>
+
+    <form method="get" class="filter-bar" aria-label="Entry filters" style="margin-bottom: var(--s-5);">
+      <div class="filter-bar__inner">
+        <span class="filter-bar__label">Filters</span>
+
+        <div class="toggle-group" role="group" aria-label="Quarter filter">
+          {% for q in fopts.quarters %}
+            {% set active = q in cf.quarters %}
+            <label class="toggle-pill {% if active %}toggle-pill--active{% endif %}">
+              <input type="checkbox" name="quarter" value="{{ q }}" {% if active %}checked{% endif %} onchange="this.form.submit()" />
+              <span>{{ q }}</span>
+            </label>
+          {% endfor %}
+        </div>
+
+        <label class="filter-chip">
+          <span class="filter-chip__label">Status</span>
+          <select name="status_filter" onchange="this.form.submit()">
+            <option value="active"    {% if cf.status_filter == 'active' %}selected{% endif %}>Active</option>
+            <option value="cancelled" {% if cf.status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
+            <option value="all"       {% if cf.status_filter == 'all' %}selected{% endif %}>All</option>
+          </select>
+        </label>
+
+        <label class="filter-chip">
+          <span class="filter-chip__label">Client</span>
+          <select name="client_type" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for c in fopts.client_types %}
+              <option value="{{ c }}" {% if cf.client_type == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        {% if fopts.show_region and fopts.regions %}
+        <label class="filter-chip">
+          <span class="filter-chip__label">Region</span>
+          <select name="region" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for r in fopts.regions %}
+              <option value="{{ r }}" {% if cf.region == r %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endif %}
+
+        {% if fopts.show_salesperson and fopts.salespeople %}
+        <label class="filter-chip">
+          <span class="filter-chip__label">Salesperson</span>
+          <select name="salesperson_id" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for sp in fopts.salespeople %}
+              <option value="{{ sp.id }}" {% if cf.salesperson_id == sp.id|string %}selected{% endif %}>{{ sp.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endif %}
+
+        {% if active_filter_count %}
+          <a class="filter-bar__reset" href="{{ url_for('entries') }}">Reset</a>
+        {% endif %}
+
+        <a class="filter-bar__export"
+           href="{{ url_for('entries_export_csv') }}{% if request.query_string %}?{{ request.query_string.decode('utf-8') }}{% endif %}"
+           title="Download all visible entries as CSV (respects current filters)">Export CSV ↓</a>
+      </div>
+    </form>
+
+    <div class="card">
+      <table class="tbl tbl--entries">
+        <thead>
+          <tr>
+            <th>State</th>
+            <th>ID</th>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Salesperson</th>
+            <th>Quarter</th>
+            <th>Status</th>
+            <th class="num">Plan</th>
+            <th class="num">Conf%</th>
+            <th class="num">Pipeline</th>
+            <th>RO #</th>
+            <th class="num">RO total</th>
+            <th>RO file</th>
+            <th class="actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            {% set is_cancelled = r.is_cancelled %}
+            {% set is_deleted = r.is_deleted %}
+            {% set is_new = (not is_cancelled) and (not is_deleted) and recent_ids.get(r.id) %}
+            {% set deal_status = r.deal_status or 'Pipeline' %}
+            {% set status_pill = {
+              'Pipeline':    'neutral',
+              'Negotiation': 'neutral',
+              'RO Received': 'ro',
+              'Closed Won':  'won',
+              'Closed Lost': 'lost'
+            } %}
+            <tr class="
+              {%- if is_deleted %} row--deleted{% endif -%}
+              {%- if is_cancelled %} row--cancelled{% elif is_new %} row--new{% endif -%}
+            ">
+              <td>
+                {% if is_deleted %}
+                  <span class="pill pill--deleted">Deleted</span>
+                {% elif is_cancelled %}
+                  <span class="pill pill--cancelled">Cancelled</span>
+                {% elif is_new %}
+                  <span class="pill pill--new"><span class="pill__dot"></span>New</span>
+                {% else %}
+                  <span class="pill pill--neutral">Active</span>
+                {% endif %}
+              </td>
+              <td>{{ r.id }}</td>
+              <td>{{ r.client_name }}</td>
+              <td>{{ r.client_type }}</td>
+              <td>{{ r.salesperson_name }}</td>
+              <td>{{ r.quarter }}</td>
+              <td><span class="pill pill--status pill--{{ status_pill.get(deal_status, 'neutral') }}">{{ deal_status }}</span></td>
+              <td class="num">{{ '%.0f'|format(r.plan_value or 0) }}</td>
+              <td class="num">{{ '%.0f'|format(r.confidence_pct or 0) }}</td>
+              <td class="num {% if is_cancelled %}num--strike{% endif %}">{{ '%.0f'|format(r.pipeline_value or 0) }}</td>
+              <td>{{ r.ro_number or '—' }}</td>
+              <td class="num {% if is_cancelled %}num--strike{% endif %}">{{ '%.0f'|format(r.ro_total or 0) }}</td>
+              <td>
+                {% if r.ro_file_path %}
+                  <a class="t-caption" href="{{ url_for('ro_document', entry_id=r.id) }}" target="_blank" rel="noopener" style="color: var(--action-blue);">View ↗</a>
+                {% else %}—{% endif %}
+              </td>
+              <td class="actions">
+                {% if not is_deleted %}
+                  <a class="btn-pearl" href="{{ url_for('edit_entry', entry_id=r.id) }}">Edit</a>
+                  {% if is_cancelled %}
+                    <form class="inline-form" method="post" action="{{ url_for('uncancel_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl" type="submit">Reactivate</button>
+                    </form>
+                  {% else %}
+                    <form class="inline-form" method="post" action="{{ url_for('cancel_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl" type="submit"
+                              onclick="return confirm('Cancel this entry? It stays in the system but is removed from the funnel.')">Cancel</button>
+                    </form>
+                  {% endif %}
+                  {% if user.role == 'admin' %}
+                    <form class="inline-form" method="post" action="{{ url_for('delete_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl btn-pearl--danger" type="submit"
+                              onclick="return confirm('Soft-delete this entry? Data is preserved in the audit log; only admins will see it again.')">Delete</button>
+                    </form>
+                  {% endif %}
+                {% else %}
+                  {% if user.role == 'admin' %}
+                    <form class="inline-form" method="post" action="{{ url_for('undelete_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl" type="submit">Restore</button>
+                    </form>
+                  {% else %}
+                    <span class="t-caption" style="color:var(--ink-48);">Hidden</span>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="14" class="tbl-empty">No entries match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
 {% endblock %}

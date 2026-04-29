@@ -3,36 +3,86 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Revenue App</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 24px; }
-      .nav { margin-bottom: 16px; }
-      .nav a { margin-right: 12px; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #ddd; padding: 8px; }
-      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
-      .card { border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
-      .flash { background:#e8f5e9; border:1px solid #c8e6c9; padding:8px; margin:8px 0; }
-      .form-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-      .form-grid label { display:block; font-size: 12px; color:#444; }
-      .form-grid input, .form-grid select, .form-grid textarea { width:100%; padding:6px; }
-      .actions { white-space: nowrap; }
-    </style>
+    <title>{% block title %}Sync Performance{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/sync-logo-black.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ asset_version }}" />
   </head>
   <body>
-    {% if session.user_id %}
-    <div class="nav">
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('entries') }}">Revenue Entries</a>
-      <a href="{{ url_for('create_entry') }}">Add Entry</a>
-      <a href="{{ url_for('logout') }}">Logout</a>
-    </div>
-    {% endif %}
+    {% block layout %}
+      {% if session.user_id %}
+      <header class="nav-global">
+        <div class="nav-global__inner">
+          <a href="{{ url_for('dashboard') }}" class="nav-global__brand" aria-label="Sync Performance home">
+            <img src="{{ url_for('static', filename='img/sync-logo-white.png') }}" alt="Sync" />
+          </a>
+          {% if user is defined and user %}
+          <span class="nav-global__user">
+            <span class="nav-global__user-name">{{ user.name }}</span>
+            {% if user.active_access_label %}
+              <span class="nav-global__user-role">{{ user.active_access_label }}</span>
+            {% else %}
+              <span class="nav-global__user-role">{{ user.role|replace('_', ' ') }}</span>
+            {% endif %}
+            {% if user.access_count and user.access_count > 1 %}
+              <a class="nav-global__switch" href="{{ url_for('switch_role') }}" title="Switch role">Switch ↻</a>
+            {% endif %}
+          </span>
+          {% endif %}
+        </div>
+      </header>
 
-    {% for message in get_flashed_messages() %}
-      <div class="flash">{{ message }}</div>
-    {% endfor %}
+      <nav class="nav-sub" aria-label="Primary">
+        <div class="nav-sub__inner">
+          <span class="nav-sub__category">Performance</span>
+          <div class="nav-sub__links">
+            <a class="nav-sub__link {% if request.endpoint == 'dashboard' %}nav-sub__link--active{% endif %}"
+               href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a class="nav-sub__link nav-sub__link--secondary {% if request.endpoint == 'entries' %}nav-sub__link--active{% endif %}"
+               href="{{ url_for('entries') }}">Revenue Entries</a>
+            {% if show_nestle_nav %}
+              <a class="nav-sub__link nav-sub__link--secondary {% if request.endpoint and request.endpoint.startswith('nestle') %}nav-sub__link--active{% endif %}"
+                 href="{{ url_for('nestle_dashboard') }}">Nestle</a>
+            {% endif %}
+            {% if user is defined and user and user.role == 'admin' %}
+              <a class="nav-sub__link nav-sub__link--secondary {% if request.endpoint == 'admin_targets' %}nav-sub__link--active{% endif %}"
+                 href="{{ url_for('admin_targets') }}">Targets</a>
+              <a class="nav-sub__link nav-sub__link--secondary {% if request.endpoint == 'admin_team' %}nav-sub__link--active{% endif %}"
+                 href="{{ url_for('admin_team') }}">Team</a>
+              <a class="nav-sub__link nav-sub__link--secondary {% if request.endpoint == 'admin_audit' %}nav-sub__link--active{% endif %}"
+                 href="{{ url_for('admin_audit') }}">Audit log</a>
+            {% endif %}
+            <a class="nav-sub__link nav-sub__link--secondary"
+               href="{{ url_for('logout') }}">Logout</a>
+            <a class="btn-pill-primary" href="{{ url_for('create_entry') }}">Add Entry</a>
+          </div>
+        </div>
+      </nav>
+      {% endif %}
 
-    {% block content %}{% endblock %}
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="flash-stack">
+            {% for message in messages %}
+              <div class="flash">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <main class="page">
+        {% block content %}{% endblock %}
+      </main>
+
+      {% if session.user_id %}
+      <footer class="footer">
+        <div class="footer__inner">
+          <div class="footer__brand">
+            <img src="{{ url_for('static', filename='img/sync-logo-black.png') }}" alt="Sync" />
+          </div>
+          <div class="footer__legal">© Sync Performance · Internal use only</div>
+        </div>
+      </footer>
+      {% endif %}
+    {% endblock %}
   </body>
 </html>

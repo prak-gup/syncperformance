@@ -1,0 +1,148 @@
+{% extends 'base.html' %}
+{% block title %}Nestle Entries · Sync Performance{% endblock %}
+
+{% set cf = current_filters %}
+
+{% block content %}
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">Nestle Entries</h1>
+      <p class="dash-header__subtitle">
+        {% if active_filter_count %}
+          Showing {{ filtered_count }} of {{ total_count }} Nestle entries.
+        {% else %}
+          {{ total_count }} Nestle entries on file.
+        {% endif %}
+        {% if cancelled_count %} · {{ cancelled_count }} cancelled.{% endif %}
+      </p>
+    </div>
+    <span class="dash-header__role">Nestle ledger</span>
+  </header>
+
+  <form method="get" class="filter-bar" aria-label="Nestle entry filters">
+    <div class="filter-bar__inner">
+      <span class="filter-bar__label">Filters</span>
+
+      <div class="toggle-group" role="group" aria-label="Quarter filter">
+        {% for q in ['Q1','Q2','Q3','Q4'] %}
+          {% set active = q in cf.quarters %}
+          <label class="toggle-pill {% if active %}toggle-pill--active{% endif %}">
+            <input type="checkbox" name="quarter" value="{{ q }}" {% if active %}checked{% endif %} onchange="this.form.submit()" />
+            <span>{{ q }}</span>
+          </label>
+        {% endfor %}
+      </div>
+
+      <label class="filter-chip">
+        <span class="filter-chip__label">Status</span>
+        <select name="status_filter" onchange="this.form.submit()">
+          <option value="active"    {% if cf.status_filter == 'active' %}selected{% endif %}>Active</option>
+          <option value="cancelled" {% if cf.status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
+          <option value="all"       {% if cf.status_filter == 'all' %}selected{% endif %}>All</option>
+        </select>
+      </label>
+
+      {% if active_filter_count %}
+        <a class="filter-bar__reset" href="{{ url_for('nestle_entries') }}">Reset</a>
+      {% endif %}
+
+      <a class="filter-bar__export" {% if not can_edit %}style="margin-left: auto;"{% endif %}
+         href="{{ url_for('nestle_entries_export_csv') }}{% if request.query_string %}?{{ request.query_string.decode('utf-8') }}{% endif %}"
+         title="Download Nestle entries as CSV">Export CSV ↓</a>
+
+      {% if can_edit %}
+        <a class="btn-pill-primary" href="{{ url_for('nestle_create_entry') }}">Add Nestle RO</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <div class="card">
+    <table class="tbl tbl--entries">
+      <thead>
+        <tr>
+          <th>State</th>
+          <th>ID</th>
+          <th>Quarter</th>
+          <th>Status</th>
+          <th>RO #</th>
+          <th>RO date</th>
+          <th class="num">Excl GST</th>
+          <th class="num">GST</th>
+          <th class="num">Total</th>
+          <th>File</th>
+          <th>By</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          {% set is_cancelled = r.is_cancelled %}
+          {% set is_deleted = r.is_deleted %}
+          {% set is_new = (not is_cancelled) and (not is_deleted) and recent_ids.get(r.id) %}
+          {% set ds = r.deal_status or 'Pipeline' %}
+          {% set status_pill = {'Pipeline':'neutral','Negotiation':'neutral','RO Received':'ro','Closed Won':'won','Closed Lost':'lost'} %}
+          <tr class="
+            {%- if is_deleted %} row--deleted{% endif -%}
+            {%- if is_cancelled %} row--cancelled{% elif is_new %} row--new{% endif -%}
+          ">
+            <td>
+              {% if is_deleted %}<span class="pill pill--deleted">Deleted</span>
+              {% elif is_cancelled %}<span class="pill pill--cancelled">Cancelled</span>
+              {% elif is_new %}<span class="pill pill--new"><span class="pill__dot"></span>New</span>
+              {% else %}<span class="pill pill--neutral">Active</span>{% endif %}
+            </td>
+            <td>{{ r.id }}</td>
+            <td>{{ r.quarter }}</td>
+            <td><span class="pill pill--status pill--{{ status_pill.get(ds, 'neutral') }}">{{ ds }}</span></td>
+            <td>{{ r.ro_number or '—' }}</td>
+            <td>{{ r.ro_date or '—' }}</td>
+            <td class="num">{{ '%.0f'|format(r.ro_amount_excl_gst or 0) }}</td>
+            <td class="num">{{ '%.0f'|format(r.gst_value or 0) }}</td>
+            <td class="num {% if is_cancelled %}num--strike{% endif %}">{{ '%.0f'|format(r.ro_total or 0) }}</td>
+            <td>
+              {% if r.ro_file_path %}
+                <a class="t-caption" href="{{ url_for('ro_document', entry_id=r.id) }}" target="_blank" rel="noopener" style="color: var(--action-blue);">View ↗</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ r.salesperson_name }}</td>
+            <td class="actions">
+              {% if not is_deleted %}
+                {% if can_edit %}
+                  <a class="btn-pearl" href="{{ url_for('nestle_edit_entry', entry_id=r.id) }}">Edit</a>
+                {% endif %}
+                {% if is_cancelled %}
+                  {% if can_edit or user.role == 'admin' %}
+                    <form class="inline-form" method="post" action="{{ url_for('nestle_uncancel_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl" type="submit">Reactivate</button>
+                    </form>
+                  {% endif %}
+                {% else %}
+                  {% if can_edit or user.role == 'admin' %}
+                    <form class="inline-form" method="post" action="{{ url_for('nestle_cancel_entry', entry_id=r.id) }}">
+                      <button class="btn-pearl" type="submit"
+                              onclick="return confirm('Cancel this Nestle entry? Stays in system, out of totals.')">Cancel</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+                {% if user.role == 'admin' %}
+                  <form class="inline-form" method="post" action="{{ url_for('nestle_delete_entry', entry_id=r.id) }}">
+                    <button class="btn-pearl btn-pearl--danger" type="submit"
+                            onclick="return confirm('Soft-delete this Nestle entry? Snapshot kept in audit log.')">Delete</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                <span class="t-caption" style="color: var(--ink-48);">Hidden from non-admin</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="12" class="tbl-empty">No Nestle entries match the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

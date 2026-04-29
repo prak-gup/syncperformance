@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Team · Admin · Sync Performance{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">Team</h1>
+      <p class="dash-header__subtitle">
+        Single source of truth: <code>config/team_config.json</code>. Editing here writes the file and reconciles the users table additively (existing users with entries are never deleted, just archived).
+      </p>
+    </div>
+    <span class="dash-header__role">admin</span>
+  </header>
+
+  <section class="card">
+    <h2 class="card__title">Current users (DB)</h2>
+    <table class="tbl tbl--entries">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Region</th>
+          <th>Auth</th>
+          <th>Archived</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in db_users %}
+          <tr {% if u.archived %}class="row--deleted"{% endif %}>
+            <td><strong>{{ u.name }}</strong></td>
+            <td>{{ u.email }}</td>
+            <td>{{ u.role|replace('_', ' ') }}</td>
+            <td>{{ u.region or '—' }}</td>
+            <td>{{ u.auth_provider }}</td>
+            <td>{{ 'Yes' if u.archived else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <form method="post" action="{{ url_for('admin_team') }}" class="card">
+    <h2 class="card__title">Edit team config (JSON)</h2>
+    <p class="form-section__hint">Edit and save to write <code>config/team_config.json</code> and reconcile the users table. New users are inserted; existing matched by email are updated; users not in this config are archived (data preserved).</p>
+    <textarea name="team_config_json" rows="22" spellcheck="false" style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.6;">{{ raw_json }}</textarea>
+    <div class="form-actions">
+      <button class="btn-pill-primary" type="submit">Save team config</button>
+      <a class="btn-pill-ghost" href="{{ url_for('admin_team') }}">Discard changes</a>
+    </div>
+  </form>
+
+</div>
+{% endblock %}

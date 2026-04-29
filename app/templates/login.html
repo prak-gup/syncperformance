@@ -1,13 +1,54 @@
 {% extends 'base.html' %}
-{% block content %}
-<h2>Login (Role simulation)</h2>
-<form method="post">
-  <label>Select user:</label>
-  <select name="user_id" required>
-    {% for u in users %}
-      <option value="{{ u.id }}">{{ u.name }} ({{ u.role }})</option>
-    {% endfor %}
-  </select>
-  <button type="submit">Login</button>
-</form>
+{% block title %}Sign in · Sync Performance{% endblock %}
+
+{% block layout %}
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-card__logo">
+      <img src="{{ url_for('static', filename='img/sync-logo-white.png') }}" alt="Sync" />
+    </div>
+    <p class="t-lead login-card__lead">Sign in to continue</p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for message in messages %}
+          <div class="flash">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if dev_login %}
+      <form method="post" class="login-card__form" aria-label="Role simulation login">
+        <label class="t-caption-strong" for="user_id" style="text-align:left;color:rgba(255,255,255,0.85);">Select user (dev)</label>
+        <select id="user_id" name="user_id" class="input--on-dark" required>
+          {% set last_provider = namespace(value='') %}
+          {% for u in users %}
+            {% if u.auth_provider != last_provider.value %}
+              {% if last_provider.value %}</optgroup>{% endif %}
+              <optgroup label="{{ 'Google (sync.io)' if u.auth_provider == 'google' else 'Demo (session)' }}">
+              {% set last_provider.value = u.auth_provider %}
+            {% endif %}
+            <option value="{{ u.id }}">
+              {{ u.name }} — {{ u.email }}
+              {% if u.access_count > 1 %} · {{ u.access_count }} roles{% endif %}
+            </option>
+          {% endfor %}
+          {% if last_provider.value %}</optgroup>{% endif %}
+        </select>
+        <button class="btn-pill-primary" type="submit" style="margin-top:8px;">Continue</button>
+      </form>
+
+      <p class="t-caption" style="color: rgba(255,255,255,0.55); margin: 0; text-align: center;">
+        Dev login is enabled. Set <code>SYNC_DEV_LOGIN=0</code> in production — only Google sign-in remains.
+      </p>
+    {% else %}
+      <a class="btn-pill-primary" href="{{ url_for('auth_google_start') }}" style="width:100%;justify-content:center;">
+        Sign in with Google
+      </a>
+      <p class="t-caption" style="color: rgba(255,255,255,0.55); margin: 0; text-align: center;">
+        Only @syncmedia.io accounts approved in the team config can sign in.
+      </p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

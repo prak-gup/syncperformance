@@ -1,0 +1,179 @@
+{
+  "fiscal_year": 2026,
+  "regions": [
+    "North",
+    "South",
+    "East",
+    "West",
+    "Central"
+  ],
+  "agencies": [
+    "Adglobal",
+    "Bigg Trunk",
+    "DDB Mudra",
+    "Dentsu",
+    "Dentsu / Carat",
+    "Dentsu /DentsuX",
+    "Dentsu/IProspect",
+    "Digitas",
+    "Direct",
+    "Hashtag Orange",
+    "Interactive Avenues",
+    "Madison",
+    "Omnicom Media Group",
+    "Omnicom Media Group/OMD",
+    "Omnicom Media Group/PHD",
+    "Puretech Digital",
+    "TLG",
+    "TLG/Performics",
+    "WPP",
+    "WPP/ Wavemaker",
+    "WPP/EssenceMediacom",
+    "WPP/Mindshare",
+    "WPP/Motivator",
+    "WPP/Open Door",
+    "ZenithOptimedia"
+  ],
+  "fiscal_calendar": {
+    "Q1": {
+      "start": "2026-04-01",
+      "end": "2026-06-30"
+    },
+    "Q2": {
+      "start": "2026-07-01",
+      "end": "2026-09-30"
+    },
+    "Q3": {
+      "start": "2026-10-01",
+      "end": "2026-12-31"
+    },
+    "Q4": {
+      "start": "2027-01-01",
+      "end": "2027-03-31"
+    }
+  },
+  "users": [
+    {
+      "email": "anubhav@syncmedia.io",
+      "name": "Anubhav Sharma",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": true,
+      "access": [
+        {
+          "label": "Pan India",
+          "role": "admin",
+          "region": null
+        }
+      ]
+    },
+    {
+      "email": "vikas@syncmedia.io",
+      "name": "Vikas Saxena",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": true,
+      "access": [
+        {
+          "label": "Pan India",
+          "role": "admin",
+          "region": null
+        }
+      ]
+    },
+    {
+      "email": "jeena@syncmedia.io",
+      "name": "Jeena Duggal",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": true,
+      "access": [
+        {
+          "label": "Pan India",
+          "role": "admin",
+          "region": null
+        }
+      ]
+    },
+    {
+      "email": "divyam@syncmedia.io",
+      "name": "Divyam Chaturvedi",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": false,
+      "access": [
+        {
+          "label": "Total North",
+          "role": "regional_head",
+          "region": "North"
+        },
+        {
+          "label": "North 2",
+          "role": "manager",
+          "region": "North"
+        }
+      ]
+    },
+    {
+      "email": "rahul@syncmedia.io",
+      "name": "Rahul Sachdeva",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": false,
+      "access": [
+        {
+          "label": "North 1",
+          "role": "manager",
+          "region": "North"
+        }
+      ]
+    },
+    {
+      "email": "varshesh@syncmedia.io",
+      "name": "Varshesh Parekh",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": false,
+      "access": [
+        {
+          "label": "Total (West & South)",
+          "role": "regional_head",
+          "region": null,
+          "regions_extra": [
+            "West",
+            "South"
+          ]
+        },
+        {
+          "label": "Total West",
+          "role": "regional_head",
+          "region": "West"
+        },
+        {
+          "label": "West 2",
+          "role": "manager",
+          "region": "West"
+        },
+        {
+          "label": "South 1",
+          "role": "manager",
+          "region": "South"
+        }
+      ]
+    },
+    {
+      "email": "hatim@syncmedia.io",
+      "name": "Hatim Godhrawala",
+      "auth_provider": "google",
+      "archived": false,
+      "can_delete_own_entries": false,
+      "access": [
+        {
+          "label": "West 1",
+          "role": "manager",
+          "region": "West"
+        }
+      ]
+    }
+  ]
+}

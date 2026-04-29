@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# SQLite local DBs
+*.db
+*.db-shm
+*.db-wal
+
+# Sync Performance app artifacts — RO docs live OUTSIDE the static tree.
+instance/
+app/static/uploads/
+
+# Local tooling
+.fusion/
+.DS_Store
+.idea/
+.vscode/
+
+# Plan / scratch
+.claude/plans/

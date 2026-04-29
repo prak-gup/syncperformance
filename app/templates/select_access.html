@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Select role · Sync Performance{% endblock %}
+
+{% block layout %}
+<div class="login-shell">
+  <div class="access-card">
+    <div class="login-card__logo" style="margin-bottom: var(--s-4);">
+      <img src="{{ url_for('static', filename='img/sync-logo-white.png') }}" alt="Sync" />
+    </div>
+    <p class="t-lead login-card__lead" style="margin-bottom: var(--s-2);">Hi {{ user_row.name }}.</p>
+    <p class="t-caption" style="color: rgba(255,255,255,0.7); margin: 0 0 var(--s-6);">
+      You have multiple roles. Pick one to continue.
+    </p>
+
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}<div class="flash" style="margin-bottom: var(--s-4);">{{ m }}</div>{% endfor %}
+    {% endwith %}
+
+    <form method="post" class="access-list" aria-label="Choose role">
+      {% for a in accesses %}
+        <button class="access-row" type="submit" name="access_id" value="{{ a.id }}">
+          <span class="access-row__label">{{ a.label }}</span>
+          <span class="access-row__meta">
+            <span class="access-row__role">{{ a.role|replace('_', ' ') }}</span>
+            {% if a.region %}<span class="access-row__region">{{ a.region }}</span>{% endif %}
+            {% if a.regions_extra_json %}
+              {% set extras = a.regions_extra_json|safe %}
+              <span class="access-row__region">multi-region</span>
+            {% endif %}
+          </span>
+          <span class="access-row__chevron" aria-hidden="true">→</span>
+        </button>
+      {% endfor %}
+    </form>
+
+    <p class="t-caption" style="color: rgba(255,255,255,0.5); margin: var(--s-6) 0 0; text-align: center;">
+      <a href="{{ url_for('logout') }}" style="color: rgba(255,255,255,0.7);">Use a different account</a>
+    </p>
+  </div>
+</div>
+{% endblock %}

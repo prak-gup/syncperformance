@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block title %}Nestle · Sync Performance{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">Nestle</h1>
+      <p class="dash-header__subtitle">
+        Separate ledger — Nestle entries are not part of any region / quarter / target rollup.
+        Only Rahul Sachdeva enters RO numbers here.
+      </p>
+    </div>
+    <span class="dash-header__role">Nestle ledger</span>
+  </header>
+
+  <section class="kpi-strip" aria-label="Nestle metrics">
+    <div class="kpi"><span class="kpi__label">Total RO booked</span><span class="kpi__value">{{ '%.0f'|format(summary.total_ro) }}</span></div>
+    <div class="kpi"><span class="kpi__label">Active entries</span><span class="kpi__value">{{ summary.active_count }}</span></div>
+    <div class="kpi"><span class="kpi__label">Cancelled</span><span class="kpi__value">{{ summary.cancelled_count }}</span></div>
+    <div class="kpi"><span class="kpi__label">Total records</span><span class="kpi__value">{{ summary.total_count }}</span></div>
+  </section>
+
+  {% if can_edit %}
+  <div style="display:flex; align-items:center; justify-content:space-between; gap: var(--s-3);">
+    <span class="t-caption" style="color: var(--ink-48);">You can add new Nestle entries.</span>
+    <a class="btn-pill-primary" href="{{ url_for('nestle_create_entry') }}">Add Nestle RO entry</a>
+  </div>
+  {% endif %}
+
+  <section class="card">
+    <h2 class="card__title">Recent Nestle entries</h2>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Quarter</th>
+          <th>Status</th>
+          <th>RO #</th>
+          <th>RO date</th>
+          <th class="num">Excl GST</th>
+          <th class="num">GST</th>
+          <th class="num">Total</th>
+          <th>File</th>
+          <th>Entered by</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          {% set ds = r.deal_status or 'Pipeline' %}
+          {% set status_pill = {'Pipeline':'neutral','Negotiation':'neutral','RO Received':'ro','Closed Won':'won','Closed Lost':'lost'} %}
+          <tr>
+            <td>{{ r.quarter }}</td>
+            <td><span class="pill pill--status pill--{{ status_pill.get(ds, 'neutral') }}">{{ ds }}</span></td>
+            <td>{{ r.ro_number or '—' }}</td>
+            <td>{{ r.ro_date or '—' }}</td>
+            <td class="num">{{ '%.0f'|format(r.ro_amount_excl_gst or 0) }}</td>
+            <td class="num">{{ '%.0f'|format(r.gst_value or 0) }}</td>
+            <td class="num">{{ '%.0f'|format(r.ro_total or 0) }}</td>
+            <td>
+              {% if r.ro_file_path %}
+                <a class="t-caption" href="{{ url_for('ro_document', entry_id=r.id) }}" target="_blank" rel="noopener" style="color: var(--action-blue);">View ↗</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ r.salesperson_name }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="tbl-empty">No Nestle entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <p class="t-caption" style="text-align: center; color: var(--ink-48);">
+    <a href="{{ url_for('nestle_entries') }}">View all Nestle entries →</a>
+  </p>
+
+</div>
+{% endblock %}

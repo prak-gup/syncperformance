@@ -1,94 +1,265 @@
 {% extends 'base.html' %}
+{% block title %}{{ dashboard_title }} · Sync Performance{% endblock %}
+
+{% set fopts = filter_options %}
+{% set cf = current_filters %}
+
 {% block content %}
-<h2>{{ dashboard_title }}</h2>
-<p>{{ dashboard_subtitle }}</p>
-<div class="cards">
-  <div class="card"><strong>Total Entries</strong><br/>{{ metrics.entries }}</div>
-  <div class="card"><strong>Total Plan</strong><br/>{{ '%.2f'|format(metrics.plan_value) }}</div>
-  <div class="card"><strong>Total Pipeline</strong><br/>{{ '%.2f'|format(metrics.pipeline_value) }}</div>
-  <div class="card"><strong>Total RO</strong><br/>{{ '%.2f'|format(metrics.ro_value) }}</div>
-  <div class="card"><strong>New Client Revenue</strong><br/>{{ '%.2f'|format(metrics.new_revenue) }}</div>
-  <div class="card"><strong>Existing Client Revenue</strong><br/>{{ '%.2f'|format(metrics.existing_revenue) }}</div>
-  <div class="card"><strong>Pending Follow-ups</strong><br/>{{ metrics.pending_followups }}</div>
-  <div class="card"><strong>Pipeline Conversion %</strong><br/>{{ '%.2f'|format(metrics.conversion_pct) }}%</div>
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">{{ dashboard_title }}</h1>
+      <p class="dash-header__subtitle">
+        {{ dashboard_subtitle }}
+        {% if active_filter_count %}
+          · Showing {{ filtered_visible }} of {{ total_visible }} entries
+        {% else %}
+          · {{ total_visible }} entries in scope
+        {% endif %}
+        {% if cancelled_count %} · {{ cancelled_count }} cancelled{% endif %}
+        · FY {{ fiscal_year }}
+      </p>
+    </div>
+    <span class="dash-header__role">{{ user.role|replace('_', ' ') }}</span>
+  </header>
+
+  <section class="target-hero" aria-label="Target progress">
+    <div class="target-hero__card target-hero__card--target">
+      <span class="target-hero__eyebrow">Target</span>
+      <span class="target-hero__value">{{ '%.0f'|format(target_value) }}</span>
+      <span class="target-hero__detail">
+        {% if cf.quarters %}{{ cf.quarters|join(' + ') }}{% else %}Q1 + Q2 + Q3 + Q4{% endif %}
+        · FY {{ fiscal_year }}
+      </span>
+      {% if target_carryover and target_carryover > 0 %}
+        <span class="target-hero__note">
+          {{ '%.0f'|format(target_base) }} base + {{ '%.0f'|format(target_carryover) }} carried from
+          {% for b in target_carryover_breakdown %}{{ b.quarter }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </span>
+      {% endif %}
+    </div>
+    <div class="target-hero__card target-hero__card--achieved">
+      <span class="target-hero__eyebrow">Achieved</span>
+      <span class="target-hero__value">{{ '%.0f'|format(achieved_value) }}</span>
+      <span class="target-hero__detail">RO booked, cancelled excluded</span>
+    </div>
+    <div class="target-hero__card target-hero__card--pct">
+      <span class="target-hero__eyebrow">% Achieved</span>
+      <span class="target-hero__value">
+        {% if target_value %}{{ '%.1f'|format(pct_achieved) }}%{% else %}—{% endif %}
+      </span>
+      <div class="target-bar" aria-hidden="true">
+        <span class="target-bar__fill" style="width: {{ pct_achieved if pct_achieved <= 100 else 100 }}%"></span>
+      </div>
+      <span class="target-hero__detail">
+        {% if not target_value %}Set targets to enable tracking{% else %}{{ '%.0f'|format(target_value - achieved_value) }} to go{% endif %}
+      </span>
+    </div>
+  </section>
+
+  <form method="get" class="filter-bar" aria-label="Dashboard filters">
+    <div class="filter-bar__inner">
+      <span class="filter-bar__label">Filters</span>
+
+      <div class="toggle-group" role="group" aria-label="Quarter filter (multi-select)">
+        {% for q in fopts.quarters %}
+          {% set active = q in cf.quarters %}
+          <label class="toggle-pill {% if active %}toggle-pill--active{% endif %}">
+            <input type="checkbox" name="quarter" value="{{ q }}" {% if active %}checked{% endif %} onchange="this.form.submit()" />
+            <span>{{ q }}</span>
+          </label>
+        {% endfor %}
+      </div>
+
+      <label class="filter-chip">
+        <span class="filter-chip__label">Status</span>
+        <select name="status_filter" onchange="this.form.submit()">
+          <option value="active"    {% if cf.status_filter == 'active' %}selected{% endif %}>Active</option>
+          <option value="cancelled" {% if cf.status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
+          <option value="all"       {% if cf.status_filter == 'all' %}selected{% endif %}>All</option>
+        </select>
+      </label>
+
+      <label class="filter-chip">
+        <span class="filter-chip__label">Client</span>
+        <select name="client_type" onchange="this.form.submit()">
+          <option value="">All</option>
+          {% for c in fopts.client_types %}
+            <option value="{{ c }}" {% if cf.client_type == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      {% if fopts.show_region and fopts.regions %}
+      <label class="filter-chip">
+        <span class="filter-chip__label">Region</span>
+        <select name="region" onchange="this.form.submit()">
+          <option value="">All</option>
+          {% for r in fopts.regions %}
+            <option value="{{ r }}" {% if cf.region == r %}selected{% endif %}>{{ r }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+
+      {% if fopts.show_salesperson and fopts.salespeople %}
+      <label class="filter-chip">
+        <span class="filter-chip__label">Salesperson</span>
+        <select name="salesperson_id" onchange="this.form.submit()">
+          <option value="">All</option>
+          {% for sp in fopts.salespeople %}
+            <option value="{{ sp.id }}" {% if cf.salesperson_id == sp.id|string %}selected{% endif %}>{{ sp.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+
+      {% if active_filter_count %}
+        <a class="filter-bar__reset" href="{{ url_for('dashboard') }}">Reset</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <section class="kpi-strip" aria-label="Key metrics">
+    <div class="kpi"><span class="kpi__label">Plan</span><span class="kpi__value">{{ '%.0f'|format(metrics.plan_value) }}</span></div>
+    <div class="kpi"><span class="kpi__label">Pipeline</span><span class="kpi__value">{{ '%.0f'|format(metrics.pipeline_value) }}</span></div>
+    <div class="kpi"><span class="kpi__label">RO</span><span class="kpi__value">{{ '%.0f'|format(metrics.ro_value) }}</span></div>
+    <div class="kpi"><span class="kpi__label">Pending follow-ups</span><span class="kpi__value">{{ metrics.pending_followups }}</span></div>
+  </section>
+
+  {% if show_region_breakdown %}
+  <section class="card">
+    <h2 class="card__title">Region — target vs achieved</h2>
+    <table class="tbl tbl--breakdown">
+      <thead>
+        <tr>
+          <th>Region</th>
+          <th class="num">Target</th>
+          <th class="num">Achieved</th>
+          <th class="num">Δ</th>
+          <th class="num">% Achieved</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in region_rows %}
+          <tr>
+            <td><strong>{{ r.region }}</strong></td>
+            <td class="num">{{ '%.0f'|format(r.target) }}</td>
+            <td class="num">{{ '%.0f'|format(r.achieved) }}</td>
+            <td class="num" style="color: {{ 'var(--system-green)' if r.delta >= 0 else 'var(--ink-48)' }};">{{ '%+.0f'|format(r.delta) }}</td>
+            <td class="num">
+              <span class="pct-cell">
+                <span class="bar-inline"><span class="bar-inline__fill" style="width: {{ r.pct if r.pct <= 100 else 100 }}%"></span></span>
+                {% if r.target %}{{ '%.0f'|format(r.pct) }}%{% else %}—{% endif %}
+              </span>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="tbl-empty">No regions in scope.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if show_team_breakdown %}
+  <section class="card">
+    <h2 class="card__title">Team — target vs achieved</h2>
+    <table class="tbl tbl--breakdown">
+      <thead>
+        <tr>
+          <th>Team / Access</th>
+          <th>Region</th>
+          <th>Holders</th>
+          <th class="num">Target</th>
+          <th class="num">Achieved</th>
+          <th class="num">Δ</th>
+          <th class="num">% Achieved</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in team_rows %}
+          <tr>
+            <td><strong>{{ t.label }}</strong></td>
+            <td>{{ t.region or '—' }}</td>
+            <td><span class="holders">{{ t.holders }}</span></td>
+            <td class="num">{{ '%.0f'|format(t.target) }}</td>
+            <td class="num">{{ '%.0f'|format(t.achieved) }}</td>
+            <td class="num" style="color: {{ 'var(--system-green)' if t.delta >= 0 else 'var(--ink-48)' }};">{{ '%+.0f'|format(t.delta) }}</td>
+            <td class="num">
+              <span class="pct-cell">
+                <span class="bar-inline"><span class="bar-inline__fill" style="width: {{ t.pct if t.pct <= 100 else 100 }}%"></span></span>
+                {% if t.target %}{{ '%.0f'|format(t.pct) }}%{% else %}—{% endif %}
+              </span>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="tbl-empty">No teams in scope.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <header style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--s-3);flex-wrap:wrap;margin-bottom:var(--s-4);">
+      <h2 class="card__title" style="margin:0;">Quarterly performance</h2>
+      <div class="chart-card__legend">
+        <span><span class="legend-dot legend-dot--plan"></span>Plan</span>
+        <span><span class="legend-dot legend-dot--pipeline"></span>Pipeline</span>
+        <span><span class="legend-dot legend-dot--ro"></span>RO</span>
+      </div>
+    </header>
+    <div class="bars-grid">
+      {% for q in quarters %}
+        <div class="bars-col">
+          <div class="bars-col__group" title="Plan {{ '%.0f'|format(q.plan) }} · Pipeline {{ '%.0f'|format(q.pipeline) }} · RO {{ '%.0f'|format(q.ro) }}">
+            <span class="bar bar--plan"     style="height: {{ q.plan_pct }}%"></span>
+            <span class="bar bar--pipeline" style="height: {{ q.pipeline_pct }}%"></span>
+            <span class="bar bar--ro"       style="height: {{ q.ro_pct }}%"></span>
+          </div>
+          <span class="bars-col__label">{{ q.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Recent entries</h2>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Client</th>
+          <th>Type</th>
+          <th>Salesperson</th>
+          <th>Region</th>
+          <th>Quarter</th>
+          <th>Status</th>
+          <th class="num">Pipeline</th>
+          <th class="num">RO total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in recent_rows %}
+          {% set ds = r.deal_status or 'Pipeline' %}
+          {% set status_pill = {'Pipeline':'neutral','Negotiation':'neutral','RO Received':'ro','Closed Won':'won','Closed Lost':'lost'} %}
+          <tr>
+            <td>{{ r.client_name }}</td>
+            <td>{{ r.client_type }}</td>
+            <td>{{ r.salesperson_name }}</td>
+            <td>{{ r.region or '—' }}</td>
+            <td>{{ r.quarter }}</td>
+            <td><span class="pill pill--status pill--{{ status_pill.get(ds, 'neutral') }}">{{ ds }}</span></td>
+            <td class="num">{{ '%.0f'|format(r.pipeline_value or 0) }}</td>
+            <td class="num">{{ '%.0f'|format(r.ro_total or r.ro_value or 0) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="tbl-empty">No entries match the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
 </div>
-
-{% if scope_table %}
-<h3>Hierarchy Roll-up</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Level</th><th>Entries</th><th>Plan</th><th>Pipeline</th><th>RO</th><th>New Revenue</th><th>Existing Revenue</th><th>Pending Follow-ups</th><th>Conversion %</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for s in scope_table %}
-      <tr>
-        <td>{{ s.label }}</td>
-        <td>{{ s.entries }}</td>
-        <td>{{ '%.2f'|format(s.plan_value) }}</td>
-        <td>{{ '%.2f'|format(s.pipeline_value) }}</td>
-        <td>{{ '%.2f'|format(s.ro_value) }}</td>
-        <td>{{ '%.2f'|format(s.new_revenue) }}</td>
-        <td>{{ '%.2f'|format(s.existing_revenue) }}</td>
-        <td>{{ s.pending_followups }}</td>
-        <td>{{ '%.2f'|format(s.conversion_pct) }}%</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="9">No roll-up data found.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endif %}
-
-<h3>Quarter-wise Performance</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Quarter</th><th>Entries</th><th>Plan</th><th>Pipeline</th><th>RO</th><th>New Revenue</th><th>Existing Revenue</th><th>Pending Follow-ups</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for q in quarter_summary %}
-      <tr>
-        <td>{{ q.label }}</td>
-        <td>{{ q.entries }}</td>
-        <td>{{ '%.2f'|format(q.plan_value) }}</td>
-        <td>{{ '%.2f'|format(q.pipeline_value) }}</td>
-        <td>{{ '%.2f'|format(q.ro_value) }}</td>
-        <td>{{ '%.2f'|format(q.new_revenue) }}</td>
-        <td>{{ '%.2f'|format(q.existing_revenue) }}</td>
-        <td>{{ q.pending_followups }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="8">No quarterly data found.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<h3>Recent Visible Entries</h3>
-<table>
-  <thead>
-    <tr>
-      <th>ID</th><th>Client</th><th>Type</th><th>Salesperson</th><th>Manager</th><th>Region</th><th>Quarter</th><th>Pipeline</th><th>RO</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in recent_rows %}
-      <tr>
-        <td>{{ r.id }}</td>
-        <td>{{ r.client_name }}</td>
-        <td>{{ r.client_type }}</td>
-        <td>{{ r.salesperson_name }}</td>
-        <td>{{ r.manager_name or '-' }}</td>
-        <td>{{ r.region or '-' }}</td>
-        <td>{{ r.quarter }}</td>
-        <td>{{ r.pipeline_value }}</td>
-        <td>{{ r.ro_value }}</td>
-      </tr>
-    {% else %}
-      <tr><td colspan="9">No entries found.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
 {% endblock %}

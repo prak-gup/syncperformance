@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% block title %}Audit log · Admin · Sync Performance{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <header class="dash-header">
+    <div>
+      <h1 class="dash-header__title">Audit log</h1>
+      <p class="dash-header__subtitle">
+        {% if tab == 'targets' %}
+          Versioned history of target edits — every save is recorded with old → new value, actor, and timestamp. Targets can be edited at any time; this log preserves the trail.
+          · {{ target_total }} target change{{ '' if target_total == 1 else 's' }}
+        {% else %}
+          Versioned snapshots of every create, edit, cancel, and delete on revenue entries. Soft-deleted entries are preserved here forever.
+          · {{ total }} entry record{{ '' if total == 1 else 's' }}
+        {% endif %}
+      </p>
+    </div>
+    <span class="dash-header__role">admin</span>
+  </header>
+
+  <div class="audit-tabs" role="tablist">
+    <a class="audit-tab {% if tab == 'entries' %}audit-tab--active{% endif %}"
+       href="{{ url_for('admin_audit', tab='entries') }}">Entry history</a>
+    <a class="audit-tab {% if tab == 'targets' %}audit-tab--active{% endif %}"
+       href="{{ url_for('admin_audit', tab='targets') }}">Target changes</a>
+  </div>
+
+  {% if tab == 'targets' %}
+    <section class="card" style="padding: 0;">
+      <table class="tbl tbl--audit">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Access label</th>
+            <th>Quarter / FY</th>
+            <th class="num">Old</th>
+            <th class="num">New</th>
+            <th class="num">Δ</th>
+            <th>Actor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in target_changes %}
+            <tr>
+              <td>{{ c.set_at }}</td>
+              <td><strong>{{ c.access_label }}</strong></td>
+              <td>{{ c.quarter }} · FY {{ c.fiscal_year }}</td>
+              <td class="num">{% if c.old_value is none %}—{% else %}{{ '%.0f'|format(c.old_value) }}{% endif %}</td>
+              <td class="num">{{ '%.0f'|format(c.new_value) }}</td>
+              <td class="num">
+                {% if c.old_value is none %}
+                  <span class="pill pill--new" style="text-transform:none;">+ initial</span>
+                {% else %}
+                  {% set delta = c.new_value - c.old_value %}
+                  <span style="color: {{ 'var(--system-green)' if delta > 0 else 'var(--ink-48)' if delta == 0 else '#b30c00' }};">
+                    {{ '%+.0f'|format(delta) }}
+                  </span>
+                {% endif %}
+              </td>
+              <td>{{ c.actor_name }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="tbl-empty">No target changes recorded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% else %}
+    <form method="get" class="filter-bar" aria-label="Audit filters">
+      <input type="hidden" name="tab" value="entries" />
+      <div class="filter-bar__inner">
+        <span class="filter-bar__label">Filters</span>
+
+        <label class="filter-chip">
+          <span class="filter-chip__label">Action</span>
+          <select name="action" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for a in action_options %}
+              <option value="{{ a }}" {% if action_filter == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="filter-chip">
+          <span class="filter-chip__label">Actor</span>
+          <select name="actor_id" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for a in actors %}
+              <option value="{{ a.id }}" {% if actor_filter == a.id|string %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="filter-chip">
+          <span class="filter-chip__label">Entry ID</span>
+          <input type="number" name="entry_id" value="{{ entry_filter }}"
+                 style="border:0; background:transparent; min-height:0; padding:0; width:60px; font:inherit; font-weight:600; color:var(--ink);"
+                 onchange="this.form.submit()" />
+        </label>
+
+        {% if action_filter or actor_filter or entry_filter %}
+          <a class="filter-bar__reset" href="{{ url_for('admin_audit', tab='entries') }}">Reset</a>
+        {% endif %}
+      </div>
+    </form>
+
+    <section class="card" style="padding: 0;">
+      <table class="tbl tbl--audit">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Entry</th>
+            <th>Ver</th>
+            <th>Action</th>
+            <th>Actor</th>
+            <th>Changed fields</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+            <tr>
+              <td>{{ h.occurred_at }}</td>
+              <td>#{{ h.entry_id }}</td>
+              <td>{{ h.version }}</td>
+              <td><span class="pill pill--{{ 'cancelled' if h.action in ['cancel','delete'] else 'new' if h.action == 'create' else 'neutral' }}">{{ h.action }}</span></td>
+              <td>{{ h.actor_name }} <span class="t-caption" style="color: var(--ink-48);">· {{ h.actor_role }}</span></td>
+              <td>
+                {% if h.changed_fields %}
+                  <span class="t-caption" style="color: var(--ink-80);">{{ h.changed_fields|join(', ') }}</span>
+                {% else %}
+                  <span class="t-caption" style="color: var(--ink-48);">—</span>
+                {% endif %}
+              </td>
+              <td class="actions">
+                <details>
+                  <summary class="btn-pearl" style="cursor:pointer;">Snapshot</summary>
+                  <div class="audit-diff">
+                    <table class="tbl tbl--audit-diff">
+                      <tbody>
+                        {% for k, v in h.snapshot|dictsort %}
+                          <tr {% if h.changed_fields and k in h.changed_fields %}class="audit-diff__changed"{% endif %}>
+                            <td class="audit-diff__key">{{ k }}</td>
+                            <td class="audit-diff__val">{{ v if v is not none else '—' }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="tbl-empty">No history records match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    {% if total_pages > 1 %}
+    <nav class="audit-pager" aria-label="Audit log pagination" style="display:flex;align-items:center;gap:var(--s-3);justify-content:center;">
+      {% if page > 1 %}
+        <a class="btn-pearl" href="{{ url_for('admin_audit', tab='entries', page=page-1, action=action_filter or None, actor_id=actor_filter or None, entry_id=entry_filter or None) }}">Previous</a>
+      {% endif %}
+      <span class="t-caption" style="color: var(--ink-48);">Page {{ page }} of {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a class="btn-pearl" href="{{ url_for('admin_audit', tab='entries', page=page+1, action=action_filter or None, actor_id=actor_filter or None, entry_id=entry_filter or None) }}">Next</a>
+      {% endif %}
+    </nav>
+    {% endif %}
+  {% endif %}
+
+</div>
+{% endblock %}

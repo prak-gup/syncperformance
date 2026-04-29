@@ -1,62 +1,378 @@
 {% extends 'base.html' %}
+{% block title %}{% if entry %}Edit{% else %}Add{% endif %} Revenue Entry · Sync Performance{% endblock %}
+
+{# Resolve current values: form_values (POST round-trip on validation error), entry (edit), or empty (new). #}
+{% macro v(field, default='') %}
+  {%- if form_values is defined and form_values is not none and form_values.get(field) is not none -%}
+    {{ form_values.get(field) }}
+  {%- elif entry is defined and entry is not none and entry[field] is not none -%}
+    {{ entry[field] }}
+  {%- else -%}
+    {{ default }}
+  {%- endif -%}
+{% endmacro %}
+
+{% set current_status = (form_values.deal_status if form_values else None) or (entry.deal_status if entry and entry.deal_status else 'Pipeline') %}
+{% set current_negotiation = (form_values.negotiation if form_values else None) or (entry.negotiation if entry else None) %}
+{% set existing_file = entry.ro_file_path if entry and entry.ro_file_path else None %}
+
 {% block content %}
-<h2>{% if entry %}Edit{% else %}Add{% endif %} Revenue Entry</h2>
-<form method="post" class="form-grid">
-  <div>
-    <label>Client Name *</label>
-    <input name="client_name" required value="{{ entry.client_name if entry else '' }}" />
+<section class="tile tile--light">
+  <div class="tile-inner">
+    <header class="page-header">
+      <div class="page-header__copy">
+        <h1 class="t-tile-headline page-header__title">
+          {% if entry %}Edit Revenue Entry{% else %}Add Revenue Entry{% endif %}
+        </h1>
+        <p class="t-lead page-header__lead">
+          {% if entry %}Update the details below and save.{% else %}Three sections — fill in left to right. RO block is required only when you mark the deal closed.{% endif %}
+        </p>
+      </div>
+    </header>
+
+    <form method="post" enctype="multipart/form-data" class="card form-card" novalidate>
+      {# ---- Section 1: Client & assignment ---- #}
+      <div class="form-section">
+        <h2 class="form-section__title">1 · Client &amp; assignment</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="client_name">Client name *</label>
+            <input id="client_name" name="client_name" required value="{{ v('client_name') }}" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="client_type">Client type *</label>
+            <select id="client_type" name="client_type" required>
+              {% set ctype = (form_values.client_type if form_values else None) or (entry.client_type if entry else 'New') %}
+              <option value="New"      {% if ctype == 'New' %}selected{% endif %}>New</option>
+              <option value="Existing" {% if ctype == 'Existing' %}selected{% endif %}>Existing</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="agency_name">Agency name <span class="field__hint">(pick from list or create new)</span></label>
+            <div class="combobox" data-combobox role="combobox" aria-expanded="false" aria-haspopup="listbox">
+              <input id="agency_name" name="agency_name" type="text" autocomplete="off"
+                     class="combobox__input"
+                     value="{{ v('agency_name') }}"
+                     placeholder="Type to search — e.g. Dentsu, WPP, Direct"
+                     aria-autocomplete="list" aria-controls="agency-listbox" />
+              <button type="button" class="combobox__toggle" aria-label="Show agency list" tabindex="-1">
+                <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true">
+                  <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M1 1l4 4 4-4"/>
+                </svg>
+              </button>
+              <div class="combobox__panel" hidden>
+                <ul id="agency-listbox" class="combobox__list" role="listbox" aria-label="Agencies"></ul>
+                <div class="combobox__empty" hidden>No matches.</div>
+              </div>
+            </div>
+            <script type="application/json" data-combobox-options>{{ (agencies or [])|tojson }}</script>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="campaign_name">Campaign name</label>
+            <input id="campaign_name" name="campaign_name" value="{{ v('campaign_name') }}" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="quarter">Quarter *</label>
+            <select id="quarter" name="quarter" required>
+              {% set qcurr = (form_values.quarter if form_values else None) or (entry.quarter if entry else 'Q1') %}
+              {% for q in ['Q1','Q2','Q3','Q4'] %}
+                <option value="{{ q }}" {% if qcurr == q %}selected{% endif %}>{{ q }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="entry_date">Entry date *</label>
+            <input id="entry_date" type="date" name="entry_date" required
+                   value="{{ v('entry_date') if v('entry_date') else today }}" />
+          </div>
+        </div>
+      </div>
+
+      {# ---- Section 2: Pipeline ---- #}
+      <div class="form-section">
+        <h2 class="form-section__title">2 · Pipeline</h2>
+        <p class="form-section__hint">Pipeline = <strong>Plan × Confidence%</strong>. Set Confidence to 100 only for committed deals; lower it for everything else.</p>
+        <div class="form-grid">
+          <div class="field field--checkbox">
+            {% set ps = (form_values.plan_shared if form_values else None) %}
+            {% if ps is none and entry %}{% set ps = entry.plan_shared %}{% endif %}
+            <input id="plan_shared" type="checkbox" name="plan_shared" {% if ps %}checked{% endif %} />
+            <label class="field__label" for="plan_shared">Plan shared with client</label>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="plan_date">Plan date</label>
+            <input id="plan_date" type="date" name="plan_date" value="{{ v('plan_date') }}" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="plan_value">Plan value</label>
+            <input id="plan_value" type="number" step="0.01" min="0" name="plan_value"
+                   value="{{ v('plan_value', '0') }}" oninput="recomputePipeline()" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="confidence_pct">Confidence %</label>
+            <input id="confidence_pct" type="number" step="1" min="0" max="100" name="confidence_pct"
+                   value="{{ v('confidence_pct', '0') }}" oninput="recomputePipeline()" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="pipeline_value_display">Pipeline value <span class="field__hint">(Plan × Confidence%)</span></label>
+            <input id="pipeline_value_display" type="text" readonly tabindex="-1"
+                   value="0.00" class="input--readonly" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="negotiation">Negotiation</label>
+            <select id="negotiation" name="negotiation">
+              <option value=""    {% if not current_negotiation %}selected{% endif %}>—</option>
+              <option value="Yes" {% if current_negotiation == 'Yes' %}selected{% endif %}>Yes</option>
+              <option value="No"  {% if current_negotiation == 'No' %}selected{% endif %}>No</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="follow_up_date">Follow-up date</label>
+            <input id="follow_up_date" type="date" name="follow_up_date" value="{{ v('follow_up_date') }}" />
+          </div>
+
+          <div class="field form-grid--full">
+            <label class="field__label" for="remarks">Remarks</label>
+            <textarea id="remarks" name="remarks" rows="3">{{ v('remarks') }}</textarea>
+          </div>
+        </div>
+      </div>
+
+      {# ---- Section 3: RO closure ---- #}
+      <div class="form-section ro-section" id="ro-section" data-status="{{ current_status }}">
+        <header class="ro-section__header">
+          <h2 class="form-section__title">3 · RO &amp; deal status</h2>
+          <span class="ro-section__pill" id="ro-required-pill">Required to close</span>
+        </header>
+        <p class="form-section__hint">
+          Set <strong>Deal status</strong> to <em>RO Received</em> or <em>Closed Won</em> only after RO number, RO amount excl. GST, GST value, and the RO file are filled. The server will block submission otherwise.
+        </p>
+
+        {% if form_errors %}
+          <div class="form-errors">
+            <strong>Cannot save yet:</strong>
+            <ul>{% for e in form_errors %}<li>{{ e }}</li>{% endfor %}</ul>
+          </div>
+        {% endif %}
+
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="deal_status">Deal status *</label>
+            <select id="deal_status" name="deal_status" required onchange="updateRoSection()">
+              {% for s in deal_statuses %}
+                <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_date">RO date <span class="ro-required-mark">*</span></label>
+            <input id="ro_date" type="date" name="ro_date" value="{{ v('ro_date') }}" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_number">RO number <span class="ro-required-mark">*</span></label>
+            <input id="ro_number" name="ro_number" value="{{ v('ro_number') }}" placeholder="e.g. RO-2026-04-1273" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_amount_excl_gst">RO amount (excl. GST) <span class="ro-required-mark">*</span></label>
+            <input id="ro_amount_excl_gst" type="number" step="0.01" min="0"
+                   name="ro_amount_excl_gst" value="{{ v('ro_amount_excl_gst', '0') }}" oninput="recomputeRoTotal()" />
+          </div>
+
+          {# GST % default: prefer the stored gst_pct; otherwise derive from existing
+             gst_value / excl on edit so older rows show a sensible value. #}
+          {% set gst_pct_default = 0 %}
+          {% if form_values is defined and form_values is not none and form_values.get('gst_pct') is not none %}
+            {% set gst_pct_default = form_values.get('gst_pct') %}
+          {% elif entry is defined and entry is not none and entry['gst_pct'] is not none %}
+            {% set gst_pct_default = entry['gst_pct'] %}
+          {% elif entry is defined and entry is not none and entry['ro_amount_excl_gst'] and entry['gst_value'] %}
+            {% set gst_pct_default = (entry['gst_value'] * 100.0 / entry['ro_amount_excl_gst']) | round(2) %}
+          {% endif %}
+
+          <div class="field">
+            <label class="field__label" for="gst_pct">GST % <span class="ro-required-mark">*</span> <span class="field__hint">(rate, e.g. 18)</span></label>
+            <input id="gst_pct" type="number" step="0.01" min="0" max="100"
+                   name="gst_pct" value="{{ '%.2f'|format(gst_pct_default) }}" oninput="recomputeRoTotal()" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="gst_value_display">GST value <span class="field__hint">(Excl × GST%)</span></label>
+            <input id="gst_value_display" type="text" readonly tabindex="-1"
+                   value="0.00" class="input--readonly" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_total_display">Total <span class="field__hint">(Excl + GST)</span></label>
+            <input id="ro_total_display" type="text" readonly tabindex="-1"
+                   value="0.00" class="input--readonly" />
+          </div>
+
+          <div class="field form-grid--full">
+            <label class="field__label" for="ro_file">RO file <span class="ro-required-mark">*</span> <span class="field__hint">(PDF, JPG, PNG · ≤10 MB)</span></label>
+            <input id="ro_file" type="file" name="ro_file" accept=".pdf,.jpg,.jpeg,.png" />
+            {% if existing_file %}
+              <div class="t-caption" style="margin-top: 6px; color: var(--ink-48);">
+                On file:
+                <a href="{{ url_for('ro_document', entry_id=entry.id) }}" target="_blank" rel="noopener">View current RO document ↗</a>
+                — leave the input above empty to keep this file; pick a new one to replace it.
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-pill-primary" type="submit">Save</button>
+        <a class="btn-pill-ghost" href="{{ url_for('entries') }}">Cancel</a>
+      </div>
+    </form>
   </div>
-  <div>
-    <label>Client Type *</label>
-    <select name="client_type" required>
-      <option value="New" {% if entry and entry.client_type == 'New' %}selected{% endif %}>New</option>
-      <option value="Existing" {% if entry and entry.client_type == 'Existing' %}selected{% endif %}>Existing</option>
-    </select>
-  </div>
+</section>
 
-  <div><label>Agency Name</label><input name="agency_name" value="{{ entry.agency_name if entry else '' }}" /></div>
-  <div><label>Campaign Name</label><input name="campaign_name" value="{{ entry.campaign_name if entry else '' }}" /></div>
+<script>
+  function recomputePipeline() {
+    var plan = parseFloat(document.getElementById('plan_value').value) || 0;
+    var conf = parseFloat(document.getElementById('confidence_pct').value) || 0;
+    document.getElementById('pipeline_value_display').value = (plan * conf / 100).toFixed(2);
+  }
+  function recomputeRoTotal() {
+    var excl = parseFloat(document.getElementById('ro_amount_excl_gst').value) || 0;
+    var pct  = parseFloat(document.getElementById('gst_pct').value) || 0;
+    var gst  = excl * pct / 100;
+    document.getElementById('gst_value_display').value = gst.toFixed(2);
+    document.getElementById('ro_total_display').value  = (excl + gst).toFixed(2);
+  }
+  function updateRoSection() {
+    var status = document.getElementById('deal_status').value;
+    var section = document.getElementById('ro-section');
+    section.dataset.status = status;
+    var requiresRo = (status === 'RO Received' || status === 'Closed Won');
+    section.classList.toggle('ro-section--required', requiresRo);
+  }
+  recomputePipeline();
+  recomputeRoTotal();
+  updateRoSection();
 
-  <div>
-    <label>Assigned Salesperson *</label>
-    <select name="assigned_user_id" required>
-      {% for u in assignable %}
-        <option value="{{ u.id }}" {% if entry and entry.assigned_user_id == u.id %}selected{% endif %}>{{ u.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
+  /* ------------------------------------------------------------------ */
+  /* Searchable combobox (Agency picker)                                */
+  /* ------------------------------------------------------------------ */
+  document.querySelectorAll('[data-combobox]').forEach(function (root) {
+    var input = root.querySelector('.combobox__input');
+    var toggle = root.querySelector('.combobox__toggle');
+    var panel = root.querySelector('.combobox__panel');
+    var list = root.querySelector('.combobox__list');
+    var empty = root.querySelector('.combobox__empty');
+    var optionsEl = root.parentElement.querySelector('[data-combobox-options]');
+    var options = [];
+    try { options = JSON.parse(optionsEl.textContent || '[]'); } catch (_) {}
+    var highlighted = -1;
 
-  <div>
-    <label>Quarter *</label>
-    <select name="quarter" required>
-      {% for q in ['Q1','Q2','Q3','Q4'] %}
-      <option value="{{ q }}" {% if entry and entry.quarter == q %}selected{% endif %}>{{ q }}</option>
-      {% endfor %}
-    </select>
-  </div>
+    function open() {
+      panel.hidden = false;
+      root.setAttribute('aria-expanded', 'true');
+    }
+    function close() {
+      panel.hidden = true;
+      root.setAttribute('aria-expanded', 'false');
+      highlighted = -1;
+    }
+    function isOpen() { return !panel.hidden; }
 
-  <div><label>Entry Date *</label><input type="date" name="entry_date" required value="{{ entry.entry_date if entry else today }}"/></div>
-  <div><label>Plan Shared</label><input type="checkbox" name="plan_shared" {% if entry and entry.plan_shared %}checked{% endif %}/></div>
+    function render() {
+      var q = (input.value || '').trim();
+      var ql = q.toLowerCase();
+      var matches = options.filter(function (o) {
+        return ql === '' || o.toLowerCase().indexOf(ql) !== -1;
+      });
+      var exactMatch = q && options.some(function (o) { return o.toLowerCase() === ql; });
+      list.innerHTML = '';
+      if (q && !exactMatch) {
+        var li = document.createElement('li');
+        li.className = 'combobox__option combobox__option--create';
+        li.setAttribute('role', 'option');
+        li.dataset.value = q;
+        li.innerHTML = '<span class="combobox__plus">+</span> Create &ldquo;' + escapeHtml(q) + '&rdquo;';
+        list.appendChild(li);
+      }
+      matches.forEach(function (o) {
+        var li = document.createElement('li');
+        li.className = 'combobox__option';
+        li.setAttribute('role', 'option');
+        li.dataset.value = o;
+        li.textContent = o;
+        list.appendChild(li);
+      });
+      empty.hidden = list.children.length > 0;
+      highlighted = list.children.length ? 0 : -1;
+      paintHighlight();
+    }
+    function paintHighlight() {
+      Array.prototype.forEach.call(list.children, function (li, i) {
+        li.classList.toggle('combobox__option--active', i === highlighted);
+      });
+      var active = list.children[highlighted];
+      if (active && active.scrollIntoView) {
+        active.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    function commit(value) {
+      input.value = value;
+      close();
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
 
-  <div><label>Plan Date</label><input type="date" name="plan_date" value="{{ entry.plan_date if entry else '' }}"/></div>
-  <div><label>Plan Value</label><input type="number" step="0.01" name="plan_value" value="{{ entry.plan_value if entry else 0 }}"/></div>
-
-  <div><label>Negotiation Stage</label><input name="negotiation_stage" value="{{ entry.negotiation_stage if entry else '' }}"/></div>
-  <div><label>Pipeline Value</label><input type="number" step="0.01" name="pipeline_value" value="{{ entry.pipeline_value if entry else 0 }}"/></div>
-
-  <div><label>RO Date</label><input type="date" name="ro_date" value="{{ entry.ro_date if entry else '' }}"/></div>
-  <div><label>RO Value</label><input type="number" step="0.01" name="ro_value" value="{{ entry.ro_value if entry else 0 }}"/></div>
-
-  <div><label>Status</label><input name="status" value="{{ entry.status if entry else '' }}"/></div>
-  <div><label>Follow-up Date</label><input type="date" name="follow_up_date" value="{{ entry.follow_up_date if entry else '' }}"/></div>
-
-  <div style="grid-column: 1 / span 2;">
-    <label>Remarks</label>
-    <textarea name="remarks">{{ entry.remarks if entry else '' }}</textarea>
-  </div>
-
-  <div style="grid-column: 1 / span 2;">
-    <button type="submit">Save</button>
-  </div>
-</form>
+    input.addEventListener('focus', function () { render(); open(); });
+    input.addEventListener('input', function () { render(); open(); });
+    input.addEventListener('keydown', function (e) {
+      if (!isOpen() && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+        render(); open(); e.preventDefault(); return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (highlighted < list.children.length - 1) highlighted++;
+        paintHighlight();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (highlighted > 0) highlighted--;
+        paintHighlight();
+      } else if (e.key === 'Enter') {
+        if (isOpen() && list.children[highlighted]) {
+          e.preventDefault();
+          commit(list.children[highlighted].dataset.value);
+        }
+      } else if (e.key === 'Escape') {
+        close();
+      }
+    });
+    toggle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      if (isOpen()) { close(); } else { input.focus(); render(); open(); }
+    });
+    list.addEventListener('mousedown', function (e) {
+      var li = e.target.closest('.combobox__option');
+      if (li) { e.preventDefault(); commit(li.dataset.value); }
+    });
+    document.addEventListener('mousedown', function (e) {
+      if (!root.contains(e.target)) close();
+    });
+  });
+</script>
 {% endblock %}

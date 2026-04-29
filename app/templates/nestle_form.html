@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% block title %}{% if entry %}Edit{% else %}Add{% endif %} Nestle Entry · Sync Performance{% endblock %}
+
+{% macro v(field, default='') %}
+  {%- if form_values is defined and form_values is not none and form_values.get(field) is not none -%}
+    {{ form_values.get(field) }}
+  {%- elif entry is defined and entry is not none and entry[field] is not none -%}
+    {{ entry[field] }}
+  {%- else -%}
+    {{ default }}
+  {%- endif -%}
+{% endmacro %}
+
+{% set current_status = (form_values.deal_status if form_values else None) or (entry.deal_status if entry and entry.deal_status else 'Pipeline') %}
+{% set existing_file = entry.ro_file_path if entry and entry.ro_file_path else None %}
+
+{% block content %}
+<section class="tile tile--light">
+  <div class="tile-inner">
+    <header class="page-header">
+      <div class="page-header__copy">
+        <h1 class="t-tile-headline page-header__title">
+          {% if entry %}Edit Nestle Entry{% else %}Add Nestle Entry{% endif %}
+        </h1>
+        <p class="t-lead page-header__lead">
+          Nestle is a separate ledger — RO numbers only. No plan or pipeline forecasting needed.
+        </p>
+      </div>
+    </header>
+
+    <form method="post" enctype="multipart/form-data" class="card form-card" novalidate>
+      <div class="form-section">
+        <h2 class="form-section__title">Quarter &amp; date</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="quarter">Quarter *</label>
+            <select id="quarter" name="quarter" required>
+              {% set qcurr = (form_values.quarter if form_values else None) or (entry.quarter if entry else 'Q1') %}
+              {% for q in ['Q1','Q2','Q3','Q4'] %}
+                <option value="{{ q }}" {% if qcurr == q %}selected{% endif %}>{{ q }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label class="field__label" for="entry_date">Entry date *</label>
+            <input id="entry_date" type="date" name="entry_date" required
+                   value="{{ v('entry_date') if v('entry_date') else today }}" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section ro-section" id="ro-section" data-status="{{ current_status }}">
+        <header class="ro-section__header">
+          <h2 class="form-section__title">RO &amp; deal status</h2>
+          <span class="ro-section__pill" id="ro-required-pill">Required to close</span>
+        </header>
+        <p class="form-section__hint">
+          Set <strong>Deal status</strong> to <em>RO Received</em> or <em>Closed Won</em> only after RO number, RO amount excl. GST, GST value, and the RO file are filled. The server will block submission otherwise.
+        </p>
+
+        {% if form_errors %}
+          <div class="form-errors">
+            <strong>Cannot save yet:</strong>
+            <ul>{% for e in form_errors %}<li>{{ e }}</li>{% endfor %}</ul>
+          </div>
+        {% endif %}
+
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="deal_status">Deal status *</label>
+            <select id="deal_status" name="deal_status" required onchange="updateRoSection()">
+              {% for s in deal_statuses %}
+                <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_date">RO date <span class="ro-required-mark">*</span></label>
+            <input id="ro_date" type="date" name="ro_date" value="{{ v('ro_date') }}" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_number">RO number <span class="ro-required-mark">*</span></label>
+            <input id="ro_number" name="ro_number" value="{{ v('ro_number') }}" placeholder="e.g. NESTLE-2026-04-001" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_amount_excl_gst">RO amount (excl. GST) <span class="ro-required-mark">*</span></label>
+            <input id="ro_amount_excl_gst" type="number" step="0.01" min="0"
+                   name="ro_amount_excl_gst" value="{{ v('ro_amount_excl_gst', '0') }}" oninput="recomputeRoTotal()" />
+          </div>
+
+          {% set gst_pct_default = 0 %}
+          {% if form_values is defined and form_values is not none and form_values.get('gst_pct') is not none %}
+            {% set gst_pct_default = form_values.get('gst_pct') %}
+          {% elif entry is defined and entry is not none and entry['gst_pct'] is not none %}
+            {% set gst_pct_default = entry['gst_pct'] %}
+          {% elif entry is defined and entry is not none and entry['ro_amount_excl_gst'] and entry['gst_value'] %}
+            {% set gst_pct_default = (entry['gst_value'] * 100.0 / entry['ro_amount_excl_gst']) | round(2) %}
+          {% endif %}
+
+          <div class="field">
+            <label class="field__label" for="gst_pct">GST % <span class="ro-required-mark">*</span> <span class="field__hint">(rate, e.g. 18)</span></label>
+            <input id="gst_pct" type="number" step="0.01" min="0" max="100"
+                   name="gst_pct" value="{{ '%.2f'|format(gst_pct_default) }}" oninput="recomputeRoTotal()" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="gst_value_display">GST value <span class="field__hint">(Excl × GST%)</span></label>
+            <input id="gst_value_display" type="text" readonly tabindex="-1" value="0.00" class="input--readonly" />
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="ro_total_display">Total <span class="field__hint">(Excl + GST)</span></label>
+            <input id="ro_total_display" type="text" readonly tabindex="-1" value="0.00" class="input--readonly" />
+          </div>
+
+          <div class="field form-grid--full">
+            <label class="field__label" for="ro_file">RO file <span class="ro-required-mark">*</span> <span class="field__hint">(PDF, JPG, PNG · ≤10 MB)</span></label>
+            <input id="ro_file" type="file" name="ro_file" accept=".pdf,.jpg,.jpeg,.png" />
+            {% if existing_file %}
+              <div class="t-caption" style="margin-top: 6px; color: var(--ink-48);">
+                On file:
+                <a href="{{ url_for('ro_document', entry_id=entry.id) }}" target="_blank" rel="noopener">View current RO ↗</a>
+                — leave the input above empty to keep this file.
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="field form-grid--full">
+            <label class="field__label" for="remarks">Remarks</label>
+            <textarea id="remarks" name="remarks" rows="3">{{ v('remarks') }}</textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-pill-primary" type="submit">Save</button>
+        <a class="btn-pill-ghost" href="{{ url_for('nestle_entries') }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  function recomputeRoTotal() {
+    var excl = parseFloat(document.getElementById('ro_amount_excl_gst').value) || 0;
+    var pct  = parseFloat(document.getElementById('gst_pct').value) || 0;
+    var gst  = excl * pct / 100;
+    document.getElementById('gst_value_display').value = gst.toFixed(2);
+    document.getElementById('ro_total_display').value  = (excl + gst).toFixed(2);
+  }
+  function updateRoSection() {
+    var status = document.getElementById('deal_status').value;
+    var section = document.getElementById('ro-section');
+    section.dataset.status = status;
+    section.classList.toggle('ro-section--required', status === 'RO Received' || status === 'Closed Won');
+  }
+  recomputeRoTotal();
+  updateRoSection();
+</script>
+{% endblock %}
