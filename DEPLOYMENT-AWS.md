@@ -1,8 +1,8 @@
 # Sync Performance — AWS deployment runbook
 
-This document covers how to run the app on AWS so that **`app.db`** and **RO documents** under `instance/uploads/ro/` survive across restarts, deploys, and instance replacement.
+This document covers how to run the app on AWS with **Google OAuth login** and **S3-backed RO document storage**.
 
-The app intentionally stores all writeable state in **one directory** (set by `SYNC_DATA_DIR`) so a single mounted volume on AWS captures everything.
+RO documents are uploaded to S3 when `SYNC_S3_BUCKET` is set; otherwise they fall back to local disk under `SYNC_DATA_DIR/instance/uploads/ro/`. Authentication uses Google OAuth (authlib) — the dev login picker is disabled by setting `SYNC_DEV_LOGIN=0`.
 
 ---
 
@@ -11,13 +11,15 @@ The app intentionally stores all writeable state in **one directory** (set by `S
 ```
 SYNC_DATA_DIR/
 ├── app.db                          ← SQLite DB
-├── backups/                        ← scripts/backup.sh writes here before S3 push
-└── instance/
-    └── uploads/
-        └── ro/<uuid>.<ext>         ← RO documents
-```
+└── backups/                        ← scripts/backup.sh writes here before S3 push
 
-Point `SYNC_DATA_DIR` at a persistent mount and everything is preserved.
+S3 bucket (SYNC_S3_BUCKET)/
+└── ro-docs/<uuid>.<ext>            ← RO documents (when S3 is configured)
+
+Google OAuth (GOOGLE_OAUTH_CLIENT_ID + SECRET)
+  → /auth/google/start → /auth/google/callback
+  → Email domain gated by ALLOWED_EMAIL_DOMAIN (default: syncmedia.io)
+```
 
 ---
 
@@ -34,6 +36,11 @@ Point `SYNC_DATA_DIR` at a persistent mount and everything is preserved.
 | `SYNC_BACKUP_BUCKET` | _(none)_ | S3 bucket for `scripts/backup.sh` |
 | `SYNC_BACKUP_PREFIX` | hostname | Prefix inside the bucket |
 | `SYNC_RETENTION_DAYS` | `7` | Local snapshot retention before pruning |
+| `SYNC_S3_BUCKET` | _(none)_ | **S3 bucket for RO documents.** Set this to enable S3 uploads; omit to use local disk |
+| `SYNC_S3_PREFIX` | `ro-docs` | Key prefix inside the S3 bucket |
+| `GOOGLE_OAUTH_CLIENT_ID` | _(none)_ | **Google OAuth client ID** — create at console.cloud.google.com → APIs → Credentials |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | _(none)_ | **Google OAuth client secret** — store securely, never commit to git |
+| `ALLOWED_EMAIL_DOMAIN` | `syncmedia.io` | Only Google accounts with this email domain can sign in |
 
 The app **prints the resolved paths at startup** so you can verify the mount worked before users log in.
 
@@ -103,6 +110,10 @@ WorkingDirectory=/opt/sync
 Environment=SYNC_DATA_DIR=/var/lib/sync
 Environment=SYNC_DEV_LOGIN=0
 Environment=SYNC_SECRET_KEY=__GENERATE_A_REAL_ONE__
+Environment=SYNC_S3_BUCKET=sync-perf-ro-docs
+Environment=GOOGLE_OAUTH_CLIENT_ID=__YOUR_CLIENT_ID__.apps.googleusercontent.com
+Environment=GOOGLE_OAUTH_CLIENT_SECRET=__YOUR_CLIENT_SECRET__
+Environment=ALLOWED_EMAIL_DOMAIN=syncmedia.io
 Environment=PORT=5050
 ExecStart=/opt/sync/.venv/bin/gunicorn -w 3 -b 127.0.0.1:5050 app.main:app
 Restart=on-failure
@@ -165,9 +176,9 @@ When you outgrow single-instance:
 ```
 
 **What changes in the code** to support this:
-- The DB switches from SQLite to Postgres. Right now `sqlite3.connect(DB_PATH)` is in `get_db()` (`app/main.py:55`); replace with `psycopg2.connect(...)` and update SQL where SQLite-specific syntax appears (mostly the `pragma table_info` migration check and the `on conflict ... do update set` upserts — both have direct Postgres equivalents).
+- The DB switches from SQLite to Postgres. Right now `sqlite3.connect(DB_PATH)` is in `get_db()`; replace with `psycopg2.connect(...)` and update SQL where SQLite-specific syntax appears (mostly the `pragma table_info` migration check and the `on conflict ... do update set` upserts — both have direct Postgres equivalents).
 - DB connection string from `SYNC_DATABASE_URL` env var.
-- Files can stay on EFS (simpler) or move to S3 with presigned URLs (cheaper at scale; see "Migration" below).
+- RO documents are already in S3 (no code change needed).
 
 **What stays unchanged**:
 - Templates, routes, permissions, audit log, target carry-forward, RO closure gate.
@@ -222,19 +233,65 @@ EBS snapshots are great for full-disk DR but recover slowly (10s of minutes). Th
 
 ---
 
-## Future migration to S3 (objects) + RDS (DB)
+## S3 RO document storage (already built-in)
 
-If RO traffic grows or you want zero-disk-management, swap two functions in `app/main.py`:
+RO documents are stored in S3 when `SYNC_S3_BUCKET` is set. The app handles this automatically:
 
-| Function | Replace with |
-|----------|--------------|
-| `save_ro_file(file_storage)` (line ~365) | `boto3.client('s3').upload_fileobj(...)` returning the S3 key as `ro_file_path` |
-| `ro_document(entry_id)` (line ~1980) | After permission check, return a redirect to a **15-minute presigned URL** (`s3.generate_presigned_url`) — the S3 GET still requires the signature, so the auth boundary is preserved |
+- **Upload**: `save_ro_file()` uploads to `s3://{SYNC_S3_BUCKET}/{SYNC_S3_PREFIX}/{uuid}.{ext}` with the correct `ContentType`.
+- **Download**: `ro_document()` generates a **15-minute presigned URL** and redirects the browser. The S3 GET requires the signature, so the auth boundary is preserved.
+- **Fallback**: If `SYNC_S3_BUCKET` is empty/unset, files are stored on local disk as before.
 
-For the DB:
-- The schema (`app/main.py:60` area) is already plain SQL — only the column-introspection `pragma table_info` and SQLite-specific `on conflict ... do update set` upserts need Postgres equivalents.
-- Use `SYNC_DATABASE_URL=postgresql://user:pw@host/db` and switch the connector in `get_db()` accordingly.
-- All other code (`write_history`, `effective_target_for_scope`, etc.) is portable.
+### S3 bucket setup
+
+```bash
+# Create the bucket
+aws s3 mb s3://sync-perf-ro-docs
+
+# Block public access (files are served via presigned URLs, not direct)
+aws s3api put-public-access-block --bucket sync-perf-ro-docs \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+# Enable versioning (optional but recommended)
+aws s3api put-bucket-versioning --bucket sync-perf-ro-docs --versioning-configuration Status=Enabled
+```
+
+### IAM policy for the EC2 instance
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::sync-perf-ro-docs/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::sync-perf-backups/*"
+    }
+  ]
+}
+```
+
+---
+
+## Google OAuth setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
+2. Create a project (or use an existing one)
+3. Configure the **OAuth consent screen** (External or Internal depending on your org)
+4. Create **OAuth 2.0 Client ID** → Web application
+5. Add **Authorized redirect URI**: `https://your-domain.com/auth/google/callback`
+6. Copy the **Client ID** and **Client Secret** into the env vars:
+
+```
+GOOGLE_OAUTH_CLIENT_ID=123456789.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxx
+```
+
+The app gates access by email domain (`ALLOWED_EMAIL_DOMAIN`, defaults to `syncmedia.io`). Users must already exist in `team_config.json` — the OAuth flow matches by email via `resolve_user_by_email()`.
 
 ---
 
@@ -245,9 +302,10 @@ For the DB:
 - [ ] HTTPS terminated at ALB / nginx (`Strict-Transport-Security` enabled)
 - [ ] `SYNC_BACKUP_BUCKET` has versioning enabled and a 30-day lifecycle to Glacier
 - [ ] EBS volumes encrypted (default-encrypt enabled at the account level)
-- [ ] IAM role for the EC2 instance permits **only** `s3:PutObject` to the backup bucket — no broader access
+- [ ] IAM role for the EC2 instance permits `s3:PutObject` to the backup bucket **and** `s3:GetObject`, `s3:PutObject` to the RO docs bucket (or the same bucket) — no broader access
 - [ ] `client_max_body_size 12M` (or higher) in nginx so 10MB RO uploads don't 413
-- [ ] Google OAuth wired (`/auth/google/callback`) before flipping `SYNC_DEV_LOGIN=0` to anything outside dev — the developer task documented in the route's docstring
+- [ ] Google OAuth configured (`GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET`) before flipping `SYNC_DEV_LOGIN=0`
+- [ ] OAuth redirect URI set to `https://your-domain.com/auth/google/callback` in Google Cloud Console
 - [ ] CloudWatch log shipping for `journalctl -u sync` so you can audit access
 - [ ] AWS Backup daily plan for the EBS volume, 14-day retention, cross-region copy
 
@@ -261,9 +319,10 @@ When you run `python app/main.py` (or `gunicorn` with the same env vars), the st
 [sync] Resolved data paths:
   DATA_DIR       = /var/lib/sync
   DB_PATH        = /var/lib/sync/app.db
-  RO_UPLOAD_DIR  = /var/lib/sync/instance/uploads/ro
+  RO_STORAGE     = s3://sync-perf-ro-docs/ro-docs
   TEAM_CONFIG    = /opt/sync/config/team_config.json
   DEV_LOGIN      = disabled
+  GOOGLE_OAUTH   = configured
 ```
 
 Read these before letting users in to confirm the mount is correct.

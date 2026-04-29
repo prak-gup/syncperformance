@@ -28,10 +28,6 @@ from werkzeug.utils import secure_filename
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# All writeable state (SQLite DB, uploaded RO docs) lives under DATA_DIR so AWS
-# deploys can mount a persistent volume (EBS / EFS) at one path and have both
-# the DB and the uploads land there. Defaults to BASE_DIR for local dev so
-# running `python app/main.py` from a fresh checkout still works without env vars.
 import os as _os_paths
 DATA_DIR = Path(_os_paths.environ.get("SYNC_DATA_DIR", str(BASE_DIR))).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,19 +42,26 @@ import os as _os
 app = Flask(__name__)
 app.config["SECRET_KEY"] = _os.environ.get("SYNC_SECRET_KEY", "dev-secret-change-me")
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB cap on uploads (RO docs)
-# Dev login (the user-id dropdown) is on by default for local testing. In production,
-# unset / set to "0" — only the Google OAuth callback should set session["user_id"].
 app.config["DEV_LOGIN_ENABLED"] = _os.environ.get("SYNC_DEV_LOGIN", "1") == "1"
 
-# RO documents live OUTSIDE the static tree so they can't be fetched without auth.
-# Served through the authenticated `/ro-doc/<entry_id>` route which re-runs the
-# same can_view_entry / can_view_nestle gate the dashboards use.
-# Defaults to DATA_DIR/instance/uploads/ro; override with SYNC_UPLOAD_DIR on AWS
-# to point at an EBS / EFS mount.
+# S3 config for RO documents. When SYNC_S3_BUCKET is set, uploads go to S3
+# and the /ro-doc/<id> route serves a presigned URL. Falls back to local disk.
+S3_BUCKET = _os.environ.get("SYNC_S3_BUCKET", "")
+S3_PREFIX = _os.environ.get("SYNC_S3_PREFIX", "ro-docs").strip("/")
+
 RO_UPLOAD_DIR = Path(
     _os_paths.environ.get("SYNC_UPLOAD_DIR", str(DATA_DIR / "instance" / "uploads" / "ro"))
 ).resolve()
 RO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _s3_client():
+    import boto3
+    return boto3.client("s3")
+
+
+def _use_s3() -> bool:
+    return bool(S3_BUCKET)
 
 
 @dataclass
@@ -394,10 +397,7 @@ def validate_ro_block(deal_status: str | None, *, ro_number: str | None,
 
 
 def save_ro_file(file_storage) -> tuple[str | None, str | None]:
-    """
-    Persist the uploaded RO document to app/static/uploads/ro/<uuid>.<ext>.
-    Returns (relative_path_or_None, error_or_None).
-    """
+    """Persist uploaded RO document to S3 (or local disk). Returns (key, error)."""
     if not file_storage or not file_storage.filename:
         return (None, None)
     original = secure_filename(file_storage.filename)
@@ -408,12 +408,27 @@ def save_ro_file(file_storage) -> tuple[str | None, str | None]:
         return (None, f"RO file must be one of: {', '.join(sorted(RO_ALLOWED_EXT))}.")
 
     new_name = f"{uuid.uuid4().hex}{ext}"
-    dest = RO_UPLOAD_DIR / new_name
-    file_storage.save(dest)
-    if dest.stat().st_size > RO_MAX_BYTES:
-        dest.unlink(missing_ok=True)
-        return (None, f"RO file exceeds {RO_MAX_BYTES // (1024 * 1024)} MB limit.")
-    return (new_name, None)  # bare filename — served via /ro-doc/<entry_id>
+
+    if _use_s3():
+        s3_key = f"{S3_PREFIX}/{new_name}"
+        file_storage.seek(0, 2)
+        size = file_storage.tell()
+        file_storage.seek(0)
+        if size > RO_MAX_BYTES:
+            return (None, f"RO file exceeds {RO_MAX_BYTES // (1024 * 1024)} MB limit.")
+        content_type = {"pdf": "application/pdf"}.get(ext.lstrip("."), f"image/{ext.lstrip('.')}")
+        _s3_client().upload_fileobj(
+            file_storage, S3_BUCKET, s3_key,
+            ExtraArgs={"ContentType": content_type},
+        )
+        return (s3_key, None)
+    else:
+        dest = RO_UPLOAD_DIR / new_name
+        file_storage.save(dest)
+        if dest.stat().st_size > RO_MAX_BYTES:
+            dest.unlink(missing_ok=True)
+            return (None, f"RO file exceeds {RO_MAX_BYTES // (1024 * 1024)} MB limit.")
+        return (new_name, None)
 
 
 def _row_snapshot(row: sqlite3.Row) -> dict[str, Any]:
@@ -1573,57 +1588,69 @@ def logout() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Google OAuth provision — STUBS for the developer to implement.
-#
-# When wired:
-#   - ALLOWED_EMAIL_DOMAIN env var (e.g. "sync.in") gates which @-domain
-#     can sign in; reject everyone else.
-#   - On successful Google callback, do:
-#         email = google_userinfo['email']
-#         if not email.endswith('@' + ALLOWED_EMAIL_DOMAIN): abort(403)
-#         user = resolve_user_by_email(email)
-#         if not user: abort(403)  # not in the team_config
-#         session['user_id'] = user.id
-#         return redirect(url_for('dashboard'))
-#
-# Required env vars (keep them out of the repo):
-#   GOOGLE_OAUTH_CLIENT_ID
-#   GOOGLE_OAUTH_CLIENT_SECRET
-#   GOOGLE_OAUTH_REDIRECT_URI   # e.g. https://app.example.com/auth/google/callback
-#   ALLOWED_EMAIL_DOMAIN        # e.g. "sync.in"
-#
-# Suggested library: authlib (`pip install authlib`).
-# The identity-resolution seam is `resolve_user_by_email(email)` — already
-# implemented above.
+# Google OAuth (authlib)
 # ---------------------------------------------------------------------------
 
-_AUTH_STUB_BODY = (
-    "<h1>Google Sign-in placeholder</h1>"
-    "<p>This route is a stub. The developer should wire Google OAuth here.</p>"
-    "<p>Required env vars: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, "
-    "GOOGLE_OAUTH_REDIRECT_URI, ALLOWED_EMAIL_DOMAIN.</p>"
-    "<p>Identity resolution helper: <code>resolve_user_by_email(email)</code>. "
-    "On success, set <code>session['user_id'] = user.id</code> and redirect to /dashboard.</p>"
+import secrets as _secrets
+
+from authlib.integrations.flask_client import OAuth
+
+_oauth = OAuth(app)
+_google = _oauth.register(
+    "google",
+    client_id=_os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""),
+    client_secret=_os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
 )
+
+ALLOWED_EMAIL_DOMAIN = _os.environ.get("ALLOWED_EMAIL_DOMAIN", "syncmedia.io")
 
 
 @app.route("/auth/google/start")
 def auth_google_start() -> Any:
-    """Stub: redirect to Google's OAuth consent. Implementation pending."""
-    response = make_response(_AUTH_STUB_BODY, 501)
-    response.headers["Content-Type"] = "text/html; charset=utf-8"
-    return response
+    redirect_uri = url_for("auth_google_callback", _external=True)
+    session["oauth_state"] = _secrets.token_urlsafe(32)
+    return _google.authorize_redirect(redirect_uri, state=session["oauth_state"])
 
 
 @app.route("/auth/google/callback")
 def auth_google_callback() -> Any:
-    """
-    Stub: exchange Google's auth code for an ID token, validate the email domain,
-    resolve to a local User via resolve_user_by_email(), then set session['user_id'].
-    """
-    response = make_response(_AUTH_STUB_BODY, 501)
-    response.headers["Content-Type"] = "text/html; charset=utf-8"
-    return response
+    incoming_state = request.args.get("state", "")
+    expected_state = session.pop("oauth_state", "")
+    if not expected_state or incoming_state != expected_state:
+        flash("Authentication failed (invalid state). Please try again.")
+        return redirect(url_for("login"))
+
+    token = _google.authorize_access_token()
+    userinfo = token.get("userinfo")
+    if not userinfo:
+        userinfo = _google.userinfo()
+    email = (userinfo.get("email") or "").strip().lower()
+    if not email:
+        flash("Could not retrieve email from Google. Please try again.")
+        return redirect(url_for("login"))
+
+    allowed = ALLOWED_EMAIL_DOMAIN.lower()
+    if allowed and not email.endswith("@" + allowed):
+        flash(f"Only @{allowed} accounts are permitted.")
+        return redirect(url_for("login"))
+
+    user = resolve_user_by_email(email)
+    if user is None:
+        flash("Your account is not set up in Sync Performance. Contact a national admin.")
+        return redirect(url_for("login"))
+
+    session.clear()
+    session["user_id"] = user.id
+    accesses = get_user_accesses(user.id)
+    if not accesses:
+        flash("Your account has no access roles. Contact a national admin.")
+        return redirect(url_for("login"))
+    if len(accesses) == 1:
+        session["active_access_id"] = int(accesses[0]["id"])
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("select_access"))
 
 
 @app.route("/dashboard")
@@ -1995,10 +2022,7 @@ def _load_entry_or_404(entry_id: int) -> sqlite3.Row:
 
 @app.route("/ro-doc/<int:entry_id>")
 def ro_document(entry_id: int) -> Any:
-    """
-    Authenticated RO document download. Re-runs the same view-permission check the
-    dashboards use; never exposes files at a publicly fetchable URL.
-    """
+    """Authenticated RO document — S3 presigned redirect or local file send."""
     user = require_user()
     entry = _load_entry_or_404(entry_id)
     book = entry["book"] or "main"
@@ -2013,11 +2037,23 @@ def ro_document(entry_id: int) -> Any:
     raw_path = (entry["ro_file_path"] or "").strip()
     if not raw_path:
         abort(404)
-    # Legacy rows may still have the old "uploads/ro/<file>" prefix from before
-    # this fix moved the storage out of /static. Strip it so we end up with the bare filename.
+
+    # S3 path: stored as "ro-docs/<uuid>.<ext>"
+    if raw_path.startswith(f"{S3_PREFIX}/") or _use_s3():
+        s3_key = raw_path
+        if not s3_key.startswith(f"{S3_PREFIX}/"):
+            s3_key = f"{S3_PREFIX}/{s3_key}"
+        url = _s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": s3_key},
+            ExpiresIn=900,
+        )
+        return redirect(url)
+
+    # Local fallback
     if raw_path.startswith("uploads/ro/"):
         raw_path = raw_path[len("uploads/ro/"):]
-    raw_path = Path(raw_path).name  # belt-and-braces: drop any path traversal attempt
+    raw_path = Path(raw_path).name
     candidate = RO_UPLOAD_DIR / raw_path
     if not candidate.is_file():
         abort(404)
